@@ -28,6 +28,8 @@ bun install
 bun run bin
 ```
 
+`install.sh` puts the CLI in `~/.lipa/bin`, so add that directory to `PATH`. The pinned tools live under `~/.lipa/tools`; lipa adds the Swift toolchain to `PATH` for `xtool` itself, so it does not have to be exported in your shell.
+
 ## Quick start
 
 ```bash

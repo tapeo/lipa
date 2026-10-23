@@ -48,7 +48,7 @@ Installs Swift 6.4.1 for Ubuntu 24.04, xtool 1.23.0 and rcodesign 0.29.0 under `
 | `lipa sdk build --xcode <path>` | `--xcode`, Xcode.app or Xcode.xip |
 | `lipa sdk pull --mac <host>` | `--mac`, `--via`, `--xcode`, `--keep` |
 
-`build` runs `xtool sdk install`, which writes to `~/.swiftpm/swift-sdks/darwin.artifactbundle`. `pull` copies Xcode.app from the Mac with the generic transport, installs the SDK and deletes the copy unless `--keep` is given.
+`build` runs `xtool sdk install`, which writes to `~/.swiftpm/swift-sdks/darwin.artifactbundle`. `pull` copies Xcode.app from the Mac with the generic transport, installs the SDK and deletes the copy unless `--keep` is given. Both put the pinned Swift toolchain on the `PATH` of `xtool`, so the shell `PATH` does not matter. When the install fails, `pull` keeps the downloaded Xcode and prints its directory instead of deleting it.
 
 ## prebuilt
 

@@ -29,6 +29,14 @@ function toolCheck(name: string, path: string, version: string | undefined): Doc
   };
 }
 
+function errorDetail(error: unknown): string {
+  if (error instanceof LipaError) {
+    return error.fix === undefined ? error.message : `${error.message}. ${error.fix}`;
+  }
+
+  return String(error);
+}
+
 export async function doctor(root: string | undefined): Promise<DoctorResult> {
   const checks: DoctorCheck[] = [];
   const toolchain = swiftToolchain();
@@ -66,7 +74,7 @@ export async function doctor(root: string | undefined): Promise<DoctorResult> {
     checks.push({
       name: 'sdk',
       ok: false,
-      detail: error instanceof LipaError ? error.message : String(error),
+      detail: errorDetail(error),
     });
   }
 

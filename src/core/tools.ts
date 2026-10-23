@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { paths } from '@/core/paths.ts';
 
 export interface PinnedTool {
@@ -50,4 +52,10 @@ export const TOOLS = [SWIFT, XTOOL, RCODESIGN];
 
 export function swiftToolchain(): string {
   return process.env.LIPA_SWIFT_TOOLCHAIN ?? `${paths().tools}/${SWIFT.extractedTree ?? 'swift'}`;
+}
+
+export function toolEnvironment(): { PATH: string } {
+  return {
+    PATH: `${join(swiftToolchain(), 'usr', 'bin')}:${paths().bin}:${process.env.PATH ?? ''}`,
+  };
 }

@@ -34,7 +34,7 @@ import {
   writeEntitlements,
 } from '@/core/signing.ts';
 import { type BuildSpec, expandPlist, readSpec } from '@/core/spec.ts';
-import { swiftToolchain } from '@/core/tools.ts';
+import { swiftToolchain, toolEnvironment } from '@/core/tools.ts';
 
 export interface BuildOptions {
   root: string;
@@ -259,15 +259,11 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
     join(packageDirectory, 'Support', 'entitlements.plist'),
   );
 
-  const environment = {
-    PATH: `${join(toolchain, 'usr', 'bin')}:${paths().bin}:${process.env.PATH ?? ''}`,
-  };
-
   const compiled = await run([xtool, 'dev', 'build', '--configuration', 'release'], {
     cwd: packageDirectory,
     stdout: 'inherit',
     stderr: 'inherit',
-    env: environment,
+    env: toolEnvironment(),
   });
 
   if (compiled.exitCode !== 0) {
