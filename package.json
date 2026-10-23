@@ -1,0 +1,27 @@
+{
+  "name": "lipa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "module": "src/main.ts",
+  "bin": {
+    "lipa": "./src/main.ts"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "verify": "bun run lint && bun run typecheck && bun run test",
+    "bin": "bun build src/main.ts --compile --outfile dist/lipa",
+    "bin:all": "bun build src/main.ts --compile --target=bun-linux-x64 --outfile dist/lipa-linux-x64 && bun build src/main.ts --compile --target=bun-linux-arm64 --outfile dist/lipa-linux-arm64"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/bun": "^1.4.0",
+    "typescript": "^5.9.0"
+  }
+}

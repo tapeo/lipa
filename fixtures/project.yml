@@ -1,0 +1,80 @@
+name: Sample
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+packages:
+  SampleCore:
+    path: .
+  Collections:
+    url: https://github.com/apple/swift-collections.git
+    from: "1.1.0"
+  Algorithms:
+    url: https://github.com/apple/swift-algorithms.git
+    exactVersion: 1.2.0
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+targets:
+  Sample:
+    type: application
+    platform: iOS
+    attributes:
+      SystemCapabilities:
+        com.apple.InAppPurchase:
+          enabled: 1
+    sources:
+      - path: Sources/Sample
+      - path: Resources/JS
+        buildPhase: resources
+      - path: Support/LaunchScreen
+        buildPhase: resources
+      - path: Support/Assets.xcassets
+      - path: Support/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: SampleCore
+        product: SampleCore
+      - package: Collections
+        product: Collections
+      - package: Algorithms
+        product: Algorithms
+    configFiles:
+      Debug: Support/Version.xcconfig
+      Release: Support/Version.xcconfig
+    settings:
+      base:
+        PRODUCT_NAME: Sample
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.sample
+        INFOPLIST_FILE: Support/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Support/Sample.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ABCDE12345
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+
+schemes:
+  Sample:
+    build:
+      targets:
+        Sample: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    profile:
+      config: Release
+    analyze:
+      config: Debug
