@@ -82,6 +82,8 @@ The Mac command receives a tar with the asset catalog and a `run.sh`, runs `xcru
 | `--out <ipa>` | `build/<app>.ipa` in the project |
 | `--target <name>` | the first iOS application target |
 
+A relative `--out` is resolved against the project root, not the directory lipa runs from.
+
 Steps: read the spec, check the prebuilt cache and the signing, write the wrapper package, run `xtool dev build --configuration release`, assemble, patch `LC_BUILD_VERSION`, keep the unstripped binary, strip, sign with `rcodesign`, zip, then run the same checks as `inspect`.
 
 ## inspect

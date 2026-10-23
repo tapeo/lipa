@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { LipaError } from '@/core/errors.ts';
 import { requireCommand, run } from '@/core/exec.ts';
 import { inspectIpa } from '@/core/inspect.ts';
@@ -179,6 +179,10 @@ function mergeInfo(appPlist: string, spec: BuildSpec, options: BuildOptions): vo
   writeFileSync(appPlist, serializePlist(info));
 }
 
+export function ipaOutput(root: string, out: string | undefined, name: string): string {
+  return resolve(root, out ?? join('build', `${name}.ipa`));
+}
+
 export async function buildIos(options: BuildOptions): Promise<BuildResult> {
   const spec = readSpec(options.root, { target: options.target });
   const sdk = readSdk();
@@ -340,7 +344,7 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
     });
   }
 
-  const ipa = options.out ?? join(spec.root, 'build', `${spec.name}.ipa`);
+  const ipa = ipaOutput(spec.root, options.out, spec.name);
   const payloadRoot = join(work, 'ipa');
   rmSync(payloadRoot, { recursive: true, force: true });
   mkdirSync(join(payloadRoot, 'Payload'), { recursive: true });
@@ -350,7 +354,12 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
   const zipped = Bun.spawnSync(['zip', '-qry', ipa, 'Payload'], { cwd: payloadRoot });
 
   if (zipped.exitCode !== 0) {
-    throw new LipaError({ code: 'generic', message: `zip failed: ${zipped.stderr.toString()}` });
+    const detail = zipped.stderr.toString().trim() || zipped.stdout.toString().trim();
+
+    throw new LipaError({
+      code: 'generic',
+      message: `zip failed with ${zipped.exitCode}: ${detail}`,
+    });
   }
 
   const inspection = inspectIpa(ipa);
