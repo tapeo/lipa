@@ -39,4 +39,4 @@ jobs:
             dist/checksums.txt \
             install.sh \
             --title "lipa $version" \
-            --notes "Build a signed iOS IPA on Linux. Includes the fix for sdk build and sdk pull, which now run xtool with the pinned Swift toolchain on PATH."
+            --generate-notes
