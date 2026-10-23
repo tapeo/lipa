@@ -1,0 +1,42 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+      - name: Build the binaries
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          LIPA_VERSION="$version" bun build src/main.ts --compile --target=bun-linux-x64 --define "process.env.LIPA_VERSION=\"$version\"" --outfile dist/lipa-linux-x64
+          LIPA_VERSION="$version" bun build src/main.ts --compile --target=bun-linux-arm64 --define "process.env.LIPA_VERSION=\"$version\"" --outfile dist/lipa-linux-arm64
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum lipa-linux-x64 lipa-linux-arm64 > checksums.txt
+          ./lipa-linux-x64 --version
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            dist/lipa-linux-x64 \
+            dist/lipa-linux-arm64 \
+            dist/checksums.txt \
+            install.sh \
+            --title "lipa $version" \
+            --notes "Build a signed iOS IPA on Linux. Includes the fix for sdk build and sdk pull, which now run xtool with the pinned Swift toolchain on PATH."
