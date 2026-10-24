@@ -6,7 +6,7 @@ Instructions for agents. They extend the global instructions.
 
 - Product: a CLI that builds a signed iOS IPA on Linux. The Mac is used only for `actool` and for the Xcode SDK.
 - Docs: `README.md` for usage, `docs/architecture.md` for the pipeline, `docs/cli.md` for commands.
-- Current state: the latest `changes/` folder.
+- Current state: the latest `changes/` folder, local only and ignored by git.
 
 ## Stack
 
@@ -31,5 +31,5 @@ Instructions for agents. They extend the global instructions.
 1. `bun run verify` passes.
 2. `lipa doctor <project>` reports every check ok on the machine.
 3. A release build of a real project ends with `lipa inspect` all ok. Run it before a release, not on every change.
-4. Add a `changes/YYYY-MM-DD_HH-MM_slug/README.md` entry.
+4. Add a `changes/YYYY-MM-DD_HH-MM_slug/README.md` entry in the local `changes/` folder, which git ignores.
 5. Grep changed files for em dashes.
