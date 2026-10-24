@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/lipa-social-preview-light.png" alt="lipa: build a signed iOS app on Linux">
+</p>
+
 # lipa
 
 Build a signed iOS app on Linux. The Mac is needed only to compile the asset catalog.
