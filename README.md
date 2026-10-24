@@ -103,7 +103,7 @@ Support/Prebuilt ◄── actool on a Mac             ▼
 - `LC_BUILD_VERSION` carries the deployment target in its SDK field, and App Store Connect rejects that as an old SDK. lipa patches it to the SDK version it linked against, before signing.
 - Signing needs `cert.pem`, `key.pem` and a profile whose `application-identifier` matches the project. `lipa doctor` checks the three against each other.
 - `prepare` compiles into that package and does not sign. `build` calls it, then assembles, signs and zips, so a warm build takes seconds.
-- `actool` output is cached per bundle id with a hash of the asset catalog, the Xcode build and the SDK version. A stale cache stops the build with `prebuilt_stale`, it does not build something different from what the Mac would.
+- `actool` output is cached per bundle id with a hash of the asset catalog and the SDK version. A stale cache stops the build with `prebuilt_stale`, it does not build something different from what the Mac would.
 
 ## State
 
