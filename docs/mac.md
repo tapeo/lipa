@@ -71,6 +71,8 @@ Nothing else runs, and nothing is written.
 
 The compile happens on the Mac only when the cache is stale: a different tree hash of the asset catalog, a different Xcode build or a different SDK. Running `prepare` and `build` with `--mac` on a fresh cache does not open a connection.
 
+When `actool` fails, its own message comes back in the error, so a catalog with an icon set named wrong says so instead of failing with an empty message.
+
 ## Failures
 
 | What happens | Code | What to do |

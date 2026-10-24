@@ -128,12 +128,12 @@ Checks the mode of the main executable, `PkgInfo`, `Assets.car` and `CFBundleIco
 ## doctor
 
 ```
-lipa doctor [<dir>] [--mac <host>]
+lipa doctor [<dir>] [--mac <host> | --via <command>]
 ```
 
 Without a directory it uses the current one. Reports the Swift toolchain, xtool, rcodesign, tar, zip, openssl, ssh, the SDK version, and, when a `project.yml` is there, the spec, the workspace, the prebuilt cache and the signing identity. Every failed check carries the command that fixes it.
 
-With `--mac` it adds one ssh call that reports macOS, the selected Xcode, the Xcode license, `actool` and the iOS SDK of the Mac against the one on Linux. Without `--mac` the Mac line says skipped; it does not make the report fail.
+With `--mac` or `--via` it adds one call that reports macOS, the selected Xcode, the Xcode license, `actool` and the iOS SDK of the Mac against the one on Linux. Without a transport the Mac line says skipped; it does not make the report fail.
 
 The Mac check is read-only: it runs `sw_vers`, `xcode-select -p`, `xcodebuild -version`, `xcrun -f actool` and `xcrun --show-sdk-version`, and writes nothing on the Mac.
 

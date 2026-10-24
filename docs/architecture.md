@@ -68,7 +68,7 @@ The Mac side is a shell script generated from the spec and sent with a tar. It n
 
 ## Doctor
 
-`doctor` collects checks for the tools, the SDK, the project, the workspace (warm when `.build` or the last app exists), the prebuilt cache and the signing. With `--mac` it adds one ssh call: `probeScript` prints five `key value` lines, `parseProbe` reads them without a Mac in the loop, and `probeChecks` turns them into checks for macOS, Xcode, `xcode-select`, `actool` and the SDK version. Without `--mac` the Mac check is marked skipped and does not fail the report.
+`doctor` collects checks for the tools, the SDK, the project, the workspace (warm when `.build` or the last app exists), the prebuilt cache and the signing. With `--mac` or `--via` it adds one call: `probeScript` prints five `key value` lines, `parseProbe` reads them without a Mac in the loop, and `probeChecks` turns them into checks for macOS, Xcode, `xcode-select`, `actool` and the SDK version. Without a transport the Mac check is marked skipped and does not fail the report.
 
 ## Signing
 

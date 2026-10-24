@@ -177,10 +177,10 @@ function deviceFlags(families: string[]): string {
 export function prebuiltScript(spec: BuildSpec): string {
   const lines = [
     'set -eu',
-    'work=$(mktemp -d)',
-    'trap \'rm -rf "$work"\' EXIT',
-    'out="$work/out"',
-    'mkdir -p "$out"',
+    'out=$(mktemp -d)',
+    'log=$(mktemp)',
+    'trap \'rm -rf "$out" "$log"\' EXIT',
+    'payload=$(cd "$(dirname "$0")" && pwd)',
     'xcrun actool --compile "$out" --platform iphoneos \\',
     `  --minimum-deployment-target ${quote(spec.minimumIOS)} \\`,
   ];
@@ -196,7 +196,10 @@ export function prebuiltScript(spec: BuildSpec): string {
   lines.push(
     `  ${deviceFlags(spec.deviceFamilies)} \\`,
     '  --output-partial-info-plist "$out/Info.plist" --output-format human-readable-text \\',
-    '  "$work/Assets.xcassets" >/dev/null',
+    '  "$payload/Assets.xcassets" >"$log" 2>&1 || {',
+    '  cat "$log" >&2',
+    '  exit 1',
+    '}',
     'plist="$out/Info.plist"',
     '[ -f "$plist" ] || printf \'<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>\' >"$plist"',
     "xcode_version=$(xcodebuild -version | sed -n 1p | sed 's/^Xcode //')",

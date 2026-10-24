@@ -8,6 +8,7 @@ import { checkMac } from '@/core/mac.ts';
 import { paths } from '@/core/paths.ts';
 import { checkPrebuilt } from '@/core/prebuilt.ts';
 import { packageDirectory, workspaceWarm } from '@/core/prepare.ts';
+import { remoteSource } from '@/core/remote.ts';
 import { readSdk } from '@/core/sdk.ts';
 import { signingStatus } from '@/core/signing.ts';
 import { readSpec } from '@/core/spec.ts';
@@ -22,6 +23,7 @@ export interface DoctorResult {
 
 export interface DoctorOptions {
   mac?: string | undefined;
+  via?: string | undefined;
 }
 
 function toolCheck(name: string, path: string, version: string | undefined): DoctorCheck {
@@ -138,14 +140,16 @@ export async function doctor(
     }
   }
 
-  if (options.mac !== undefined) {
-    checks.push(...(await checkMac({ kind: 'ssh', host: options.mac }, sdkVersion)));
+  const source = remoteSource({ mac: options.mac, via: options.via });
+
+  if (source !== undefined) {
+    checks.push(...(await checkMac(source, sdkVersion)));
   } else {
     checks.push({
       name: 'mac',
       ok: true,
       skipped: true,
-      detail: 'not checked, run lipa doctor --mac <host> to check the Mac',
+      detail: 'not checked, run lipa doctor --mac <host> or --via <command> to check the Mac',
     });
   }
 

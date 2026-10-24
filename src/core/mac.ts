@@ -1,6 +1,6 @@
 import type { Check } from '@/core/checks.ts';
 import { LipaError, toLipaError } from '@/core/errors.ts';
-import { type RemoteSource, remoteCapture, remoteName } from '@/core/remote.ts';
+import { type RemoteSource, remoteCapture } from '@/core/remote.ts';
 
 export interface MacProbe {
   os: string;
@@ -70,6 +70,14 @@ function licenseMissing(xcode: string): boolean {
   return /license/i.test(xcode);
 }
 
+function sdkFix(source: RemoteSource): string {
+  if (source.kind === 'ssh') {
+    return `Install the same SDK with lipa sdk --mac ${source.host}.`;
+  }
+
+  return 'Install the same SDK with lipa sdk, with the same transport.';
+}
+
 export function probeChecks(
   source: RemoteSource,
   probe: MacProbe,
@@ -100,7 +108,9 @@ export function probeChecks(
     name: 'xcode-select',
     ok: developerSelected,
     detail: probe.developer === '' ? 'xcode-select -p printed nothing' : probe.developer,
-    fix: 'On the Mac run sudo xcode-select -s /Applications/Xcode.app.',
+    fix: developerSelected
+      ? undefined
+      : 'On the Mac run sudo xcode-select -s /Applications/Xcode.app.',
   });
 
   const actoolReady = probe.actool.includes('actool') && !/error|not found/i.test(probe.actool);
@@ -109,7 +119,9 @@ export function probeChecks(
     name: 'actool',
     ok: actoolReady,
     detail: probe.actool === '' ? 'not found' : probe.actool,
-    fix: 'Install the iOS platform in Xcode Settings, Platforms, then run xcodebuild -runFirstLaunch.',
+    fix: actoolReady
+      ? undefined
+      : 'Install the iOS platform in Xcode Settings, Platforms, then run xcodebuild -runFirstLaunch.',
   });
 
   if (localSdk !== undefined) {
@@ -121,7 +133,7 @@ export function probeChecks(
       detail: same
         ? `iOS ${probe.sdk}`
         : `the Mac has iOS ${probe.sdk || 'unknown'}, lipa has ${localSdk}`,
-      fix: `Install the same SDK with lipa sdk --mac ${remoteName(source)}.`,
+      fix: same ? undefined : sdkFix(source),
     });
   }
 

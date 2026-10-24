@@ -6,7 +6,7 @@ import { doctor } from '@/core/doctor.ts';
 export const doctorCommand: CommandSpec = {
   name: 'doctor',
   summary: 'Report tools, SDK, workspace, prebuilt cache, signing and the Mac',
-  usage: 'lipa doctor [<dir>] [--mac <host>]',
+  usage: 'lipa doctor [<dir>] [--mac <host> | --via <command>]',
   arguments: 1,
   flags: [
     {
@@ -14,11 +14,13 @@ export const doctorCommand: CommandSpec = {
       value: 'host',
       description: 'Mac reachable with ssh, to check Xcode, actool and the SDK there',
     },
+    { name: 'via', value: 'command', description: 'Command that runs sh on the Mac' },
   ],
   examples: ['lipa doctor', 'lipa doctor --mac macbook', 'lipa doctor ~/projects/App'],
   async run({ args, output }) {
     const result = await doctor(args.positionals[0] ?? process.cwd(), {
       mac: stringValue(args.values, 'mac'),
+      via: stringValue(args.values, 'via'),
     });
     const table = renderTable(result.checks, [
       { header: 'Check', value: (row) => row.name },

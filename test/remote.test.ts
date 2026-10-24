@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { checkMac } from '@/core/mac.ts';
-import { remoteFailure } from '@/core/remote.ts';
+import { prebuiltScript, remoteFailure } from '@/core/remote.ts';
+import { readSpec } from '@/core/spec.ts';
+
+const fixtures = join(import.meta.dir, '..', 'fixtures');
 
 const home = mkdtempSync(join(tmpdir(), 'lipa-remote-'));
 const originalPath = process.env.PATH ?? '';
@@ -103,5 +106,21 @@ describe('checkMac', () => {
     expect(checks[0]?.name).toBe('mac');
     expect(checks[0]?.ok).toBe(false);
     expect(checks[0]?.detail).toContain('Cannot reach macbook');
+  });
+});
+
+describe('prebuiltScript', () => {
+  const spec = readSpec(fixtures);
+  const script = prebuiltScript(spec);
+
+  test('reads the catalog next to run.sh, not from a new temp dir', () => {
+    expect(script).toContain('payload=$(cd "$(dirname "$0")" && pwd)');
+    expect(script).toContain('"$payload/Assets.xcassets"');
+    expect(script).not.toContain('$work/Assets.xcassets');
+  });
+
+  test('prints the actool log instead of dropping it', () => {
+    expect(script).toContain('cat "$log" >&2');
+    expect(script).not.toContain('>/dev/null\n');
   });
 });
