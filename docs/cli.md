@@ -84,7 +84,7 @@ The first form runs `xtool sdk install`, which writes to `~/.swiftpm/swift-sdks/
 
 `prepare` does the slow part of a build and stops before signing:
 
-1. `actool` on the Mac, when the asset catalog, the Xcode build or the SDK changed, or `--import` was given.
+1. `actool` on the Mac, when the asset catalog or the SDK changed, or `--import` was given.
 2. The package dependencies, resolving them again with `--update`.
 3. `xtool dev build --configuration release` in the package workspace.
 
