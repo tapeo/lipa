@@ -69,7 +69,7 @@ Nothing else runs, and nothing is written.
 
 `lipa prepare --mac macbook` sends a tar with the asset catalog and a `run.sh`, which the Mac unpacks in a temporary directory and runs. The script calls `xcrun actool` and `PlistBuddy`, writes a tar on stdout, and the remote directory is removed on exit.
 
-The compile happens on the Mac only when the cache is stale: a different tree hash of the asset catalog, a different Xcode build or a different SDK. Running `prepare` and `build` with `--mac` on a fresh cache does not open a connection.
+The compile happens on the Mac only when the cache is stale: a different tree hash of the asset catalog or a different SDK. Running `prepare` and `build` with `--mac` on a fresh cache does not open a connection.
 
 When `actool` fails, its own message comes back in the error, so a catalog with an icon set named wrong says so instead of failing with an empty message.
 
