@@ -30,6 +30,8 @@ bun run bin
 
 `install.sh` puts the CLI in `~/.lipa/bin`, so add that directory to `PATH`. The pinned tools live under `~/.lipa/tools`; lipa adds the Swift toolchain to `PATH` for `xtool` itself, so it does not have to be exported in your shell.
 
+`lipa update` replaces that binary with the latest release, after checking it against the `checksums.txt` of the release. `lipa update --check` only reports whether a newer version exists, and it works from a checkout as well.
+
 ## Quick start
 
 Each command assumes the one before it. `prepare` and `build` run the earlier steps themselves when something is missing.

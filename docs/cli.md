@@ -137,6 +137,21 @@ With `--mac` or `--via` it adds one call that reports macOS, the selected Xcode,
 
 The Mac check is read-only: it runs `sw_vers`, `xcode-select -p`, `xcodebuild -version`, `xcrun -f actool` and `xcrun --show-sdk-version`, and writes nothing on the Mac.
 
+## update
+
+| Form | Flags |
+|---|---|
+| `lipa update` | `--check` only compares, `--version <version>` installs one exact release, `--force` installs again the same version |
+
+Replaces the installed binary with `lipa-linux-x64` or `lipa-linux-arm64` from the latest release of `tapeo/lipa`, after checking it against `checksums.txt`. It writes next to the binary it runs from, so the directory has to be writable by the current user.
+
+`--check` works from a checkout too: it reports the running version against the latest release and stops. Every other form needs the standalone binary, because from `bun run bin` there is no lipa binary to replace; the answer is `capability_missing` (3).
+
+`--version` takes the tag with or without the `v`, so `--version 0.2.1` and `--version v0.2.1` are the same release. `LIPA_REPO` names a different repository, and `GITHUB_TOKEN` is sent when the API rate limit or a private fork needs it.
+
+The pinned tools and the SDK are untouched: `setup` and `sdk` own those.
+
+
 ## Transport
 
 `--mac <host>` runs `ssh -o BatchMode=yes -o ConnectTimeout=10 <host> <script>`. `--via <command>` runs `<command> '<script>'`, a single string, so the user decides how to reach the machine. Both send a tar on stdin and read a tar on stdout. No binary is installed on the Mac.

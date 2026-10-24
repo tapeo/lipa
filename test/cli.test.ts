@@ -64,4 +64,26 @@ describe('cli', () => {
     expect(result.exitCode).toBe(2);
     expect(JSON.parse(result.stdout).error.fix).toContain('lipa sdk --xcode');
   });
+
+  test('documents the flags of update', () => {
+    const result = lipa(['update', '--help']);
+
+    expect(result.stdout).toContain('--check');
+    expect(result.stdout).toContain('--version');
+    expect(result.stdout).toContain('--force');
+  });
+
+  test('refuses to replace a run from the source tree', () => {
+    const result = lipa(['--json', 'update']);
+
+    expect(result.exitCode).toBe(3);
+    expect(JSON.parse(result.stdout).error.code).toBe('capability_missing');
+  });
+
+  test('reads the version flag of update, not the global one', () => {
+    const result = lipa(['--json', 'update', '--version', '0.2.1']);
+
+    expect(result.exitCode).toBe(3);
+    expect(JSON.parse(result.stdout).error.message).toContain('source tree');
+  });
 });

@@ -17,6 +17,7 @@ src/core/mac.ts      probe of the Mac for doctor
 src/core/doctor.ts   the report
 src/core/sdk.ts      the installed Darwin SDK
 src/core/tools.ts    pinned tools
+src/core/release.ts  GitHub release lookup, checksum, binary replacement
 ```
 
 ## BuildSpec
