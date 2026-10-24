@@ -1,4 +1,5 @@
-import { cpSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,38 +9,62 @@ import { treeHash } from '@/core/hash.ts';
 import { type PlistValue, readPlist } from '@/core/plist.ts';
 import { cacheDir, MAC_KEYS, writeManifest, writePrebuiltInfo } from '@/core/prebuilt.ts';
 import type { BuildSpec } from '@/core/spec.ts';
-import { readSpec } from '@/core/spec.ts';
 
-export interface Transport {
-  mac: string | undefined;
-  via: string | undefined;
-}
+export type RemoteSource = { kind: 'ssh'; host: string } | { kind: 'via'; command: string };
 
-export function transportFrom(values: {
+export function remoteSource(values: {
   mac?: string | undefined;
   via?: string | undefined;
-}): Transport {
-  if ((values.mac === undefined) === (values.via === undefined)) {
+}): RemoteSource | undefined {
+  const { mac, via } = values;
+
+  if (mac !== undefined && via !== undefined) {
     throw new LipaError({
       code: 'usage',
-      message: 'Give either --mac <host> or --via <command>',
-      fix: 'lipa prebuilt --mac macbook runs ssh macbook. --via replaces the ssh command.',
+      message: 'Give either --mac <host> or --via <command>, not both',
+      fix: 'Use --mac for a host reachable with ssh. --via replaces the ssh command.',
     });
   }
 
-  return { mac: values.mac, via: values.via };
+  if (mac !== undefined) {
+    return { kind: 'ssh', host: mac };
+  }
+
+  if (via !== undefined) {
+    return { kind: 'via', command: via };
+  }
+
+  return undefined;
+}
+
+export function remoteName(source: RemoteSource): string {
+  if (source.kind === 'ssh') {
+    return source.host;
+  }
+
+  return source.command;
+}
+
+function diagnose(source: RemoteSource): string {
+  if (source.kind === 'ssh') {
+    return `lipa doctor --mac ${source.host}`;
+  }
+
+  return `${source.command} sh -c true`;
 }
 
 function quote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function transportArgv(transport: Transport, command: string): string[] {
-  if (transport.mac !== undefined) {
-    return ['ssh', transport.mac, command];
+const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10'];
+
+function transportArgv(source: RemoteSource, command: string): string[] {
+  if (source.kind === 'ssh') {
+    return ['ssh', ...SSH_OPTIONS, source.host, command];
   }
 
-  return ['sh', '-c', `${transport.via ?? ''} ${quote(command)}`];
+  return ['sh', '-c', `${source.command} ${quote(command)}`];
 }
 
 const UNPACK_SCRIPT = [
@@ -74,28 +99,68 @@ function extractArchive(archive: string, directory: string): void {
   }
 }
 
-interface RemoteRun {
+const UNREACHABLE =
+  /permission denied|connection refused|connection timed out|operation timed out|host key verification|could not resolve hostname|no route to host|connection closed|broken pipe/i;
+const BROKEN_XCODE =
+  /xcode-select: error|requires xcode|not agreed to the xcode license|unable to find utility/i;
+
+export function remoteFailure(source: RemoteSource, exitCode: number, stderr: string): LipaError {
+  const name = remoteName(source);
+  const detail = stderr.trim() || `exit ${exitCode}`;
+
+  if (exitCode === 255 || UNREACHABLE.test(detail)) {
+    return new LipaError({
+      code: 'remote_unreachable',
+      message: `Cannot reach ${name}: ${detail}`,
+      fix: `Check that the Mac is awake and that ssh ${name} works without a password. Then run lipa doctor --mac ${name}.`,
+    });
+  }
+
+  if (BROKEN_XCODE.test(detail)) {
+    return new LipaError({
+      code: 'capability_missing',
+      message: `The Mac cannot run the Xcode tools: ${detail}`,
+      fix: 'On the Mac run sudo xcode-select -s /Applications/Xcode.app and sudo xcodebuild -license accept, then run lipa doctor --mac <host>.',
+    });
+  }
+
+  return new LipaError({
+    code: 'remote_unreachable',
+    message: `The command on ${name} failed: ${detail}`,
+    fix: `Check the Mac with ${diagnose(source)}.`,
+  });
+}
+
+export interface RemoteRun {
   command: string;
   stdin: string | undefined;
   output: string;
 }
 
-async function remote(transport: Transport, options: RemoteRun): Promise<void> {
+async function remote(source: RemoteSource, options: RemoteRun): Promise<void> {
   const child = Bun.spawn({
-    cmd: transportArgv(transport, options.command),
+    cmd: transportArgv(source, options.command),
     stdin: options.stdin === undefined ? 'ignore' : Bun.file(options.stdin),
     stdout: Bun.file(options.output),
     stderr: 'pipe',
+    env: process.env,
   });
 
   const [stderr, exitCode] = await Promise.all([new Response(child.stderr).text(), child.exited]);
 
   if (exitCode !== 0) {
-    throw new LipaError({
-      code: 'remote_unreachable',
-      message: `The Mac command failed: ${stderr.trim() || `exit ${exitCode}`}`,
-      fix: 'Check that the Mac is awake, that ssh <host> works and that Xcode is installed.',
-    });
+    throw remoteFailure(source, exitCode, stderr);
+  }
+}
+
+export async function remoteCapture(source: RemoteSource, command: string): Promise<string> {
+  const output = join(tmpdir(), `lipa-remote-${randomUUID()}`);
+
+  try {
+    await remote(source, { command, stdin: undefined, output });
+    return readFileSync(output, 'utf8');
+  } finally {
+    rmSync(output, { force: true });
   }
 }
 
@@ -164,13 +229,14 @@ export interface PrebuiltResult {
   files: string[];
 }
 
-export async function fetchPrebuilt(root: string, transport: Transport): Promise<PrebuiltResult> {
-  const spec = readSpec(root);
-
+export async function fetchPrebuilt(
+  spec: BuildSpec,
+  source: RemoteSource,
+): Promise<PrebuiltResult> {
   if (spec.assets === undefined) {
     throw new LipaError({
       code: 'config_invalid',
-      message: `${root}/project.yml has no .xcassets in the target sources`,
+      message: `${spec.root}/project.yml has no .xcassets in the target sources`,
       fix: 'Add the asset catalog to sources.',
     });
   }
@@ -187,7 +253,7 @@ export async function fetchPrebuilt(root: string, transport: Transport): Promise
     const payload = join(work, 'payload.tar');
     const archive = join(work, 'result.tar');
     makeArchive(payloadDirectory, payload);
-    await remote(transport, { command: UNPACK_SCRIPT, stdin: payload, output: archive });
+    await remote(source, { command: UNPACK_SCRIPT, stdin: payload, output: archive });
 
     const extracted = join(work, 'result');
     extractArchive(archive, extracted);
@@ -221,7 +287,7 @@ export async function fetchPrebuilt(root: string, transport: Transport): Promise
       xcodeVersion: String(values.DTXcodeBuild),
       sdkVersion: String(values.DTPlatformVersion),
       createdAt: new Date().toISOString(),
-      source: transport.mac ?? transport.via ?? '',
+      source: remoteName(source),
     };
     writeManifest(manifest);
 
@@ -238,7 +304,7 @@ export async function fetchPrebuilt(root: string, transport: Transport): Promise
 }
 
 export async function pullXcode(
-  transport: Transport,
+  source: RemoteSource,
   remoteXcode: string,
   destination: string,
 ): Promise<void> {
@@ -247,5 +313,5 @@ export async function pullXcode(
   const name = remoteXcode.split('/').filter(Boolean).at(-1) ?? 'Xcode.app';
   const script = ['set -eu', `tar -cf - -C ${quote(parent)} ${quote(name)}`].join('\n');
 
-  await remote(transport, { command: script, stdin: undefined, output: destination });
+  await remote(source, { command: script, stdin: undefined, output: destination });
 }

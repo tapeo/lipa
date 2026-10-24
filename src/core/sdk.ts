@@ -22,7 +22,7 @@ export function readSdk(): SdkInfo {
     throw new LipaError({
       code: 'capability_missing',
       message: `No Darwin SDK in ${root}`,
-      fix: 'Run lipa sdk build --xcode <path>, or lipa sdk pull --mac <host>.',
+      fix: 'Run lipa sdk --xcode <path>, or lipa sdk --mac <host>.',
     });
   }
 
@@ -35,7 +35,7 @@ export function readSdk(): SdkInfo {
     throw new LipaError({
       code: 'capability_missing',
       message: `No iPhoneOS SDK in ${platforms}`,
-      fix: 'Run lipa sdk build --xcode <path>.',
+      fix: 'Run lipa sdk --xcode <path>.',
     });
   }
 
@@ -46,7 +46,7 @@ export function readSdk(): SdkInfo {
     throw new LipaError({
       code: 'capability_missing',
       message: `${settingsPath} has no Version`,
-      fix: 'Rebuild the SDK with lipa sdk build.',
+      fix: 'Install the SDK again with lipa sdk --xcode <path>.',
     });
   }
 

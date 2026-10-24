@@ -2,14 +2,21 @@ import type { CommandSpec } from '@/cli/command.ts';
 import { renderTable } from '@/cli/output.ts';
 import { booleanValue, stringValue } from '@/cli/parser.ts';
 import { buildIos } from '@/core/build.ts';
+import { macSource } from '@/core/prepare.ts';
 
 export const buildCommand: CommandSpec = {
   name: 'build',
   summary: 'Build, sign and package an iOS app on Linux',
   usage:
-    'lipa build [<dir>] [--build <number>] [--version <version>] [--out <ipa>] [--target <name>] [--clean]',
+    'lipa build [<dir>] [--mac <host> | --via <command>] [--build <number>] [--version <version>] [--out <ipa>] [--target <name>] [--update] [--clean]',
   arguments: 1,
   flags: [
+    {
+      name: 'mac',
+      value: 'host',
+      description: 'Mac reachable with ssh, used when the assets or the SDK changed',
+    },
+    { name: 'via', value: 'command', description: 'Command that runs sh on the Mac' },
     {
       name: 'build',
       value: 'number',
@@ -23,11 +30,15 @@ export const buildCommand: CommandSpec = {
     { name: 'out', value: 'ipa', description: 'IPA path, default build/<app>.ipa in the project' },
     { name: 'target', value: 'name', description: 'iOS application target of project.yml' },
     {
+      name: 'update',
+      description: 'Resolve the package dependencies again without compiling everything',
+    },
+    {
       name: 'clean',
       description: 'Throw away the package workspace and compile everything again',
     },
   ],
-  examples: ['lipa build', 'lipa build --build 42 --out /tmp/App.ipa', 'lipa build --clean'],
+  examples: ['lipa build', 'lipa build --mac macbook', 'lipa build --build 42 --out /tmp/App.ipa'],
   async run({ args, output }) {
     const root = args.positionals[0] ?? process.cwd();
     const result = await buildIos({
@@ -37,6 +48,12 @@ export const buildCommand: CommandSpec = {
       out: stringValue(args.values, 'out'),
       target: stringValue(args.values, 'target'),
       clean: booleanValue(args.values, 'clean'),
+      update: booleanValue(args.values, 'update'),
+      mac: macSource({
+        mac: stringValue(args.values, 'mac'),
+        via: stringValue(args.values, 'via'),
+      }),
+      stream: !output.json,
     });
 
     const rows = [

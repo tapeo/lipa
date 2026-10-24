@@ -11,32 +11,34 @@ import {
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { LipaError } from '@/core/errors.ts';
-import { requireCommand, run } from '@/core/exec.ts';
+import { requireCommand, requirePath, run } from '@/core/exec.ts';
 import { inspectIpa } from '@/core/inspect.ts';
 import { acquireBuildLock } from '@/core/lock.ts';
 import { patchBuildVersion } from '@/core/macho.ts';
 import { paths } from '@/core/paths.ts';
-import { readPlist, serializePlist } from '@/core/plist.ts';
+import { type PlistValue, readPlist, serializePlist } from '@/core/plist.ts';
+import { MAC_KEYS, prebuiltFiles, prebuiltInfo, staleError } from '@/core/prebuilt.ts';
 import {
-  checkPrebuilt,
-  MAC_KEYS,
-  prebuiltFiles,
-  prebuiltInfo,
-  staleError,
-} from '@/core/prebuilt.ts';
+  type BuildValues,
+  entitlementsFor,
+  type MacSource,
+  type PreparedWorkspace,
+  prepareWorkspace,
+} from '@/core/prepare.ts';
 import { readSdk } from '@/core/sdk.ts';
 import {
   mergedEntitlements,
   type ProfileInfo,
   profileInfo,
+  type SigningStatus,
   signingPaths,
   signingStatus,
   writeEntitlements,
 } from '@/core/signing.ts';
-import { type BuildSpec, expandPlist, readSpec } from '@/core/spec.ts';
-import { SWIFT, swiftToolchain, toolEnvironment, XTOOL } from '@/core/tools.ts';
+import { type BuildSpec, readSpec } from '@/core/spec.ts';
+import { swiftToolchain } from '@/core/tools.ts';
 import { resolveBuildNumber } from '@/core/version.ts';
-import { ensureSymlink, shortHash, writeIfChanged } from '@/core/work.ts';
+import { writeIfChanged } from '@/core/work.ts';
 
 export interface BuildOptions {
   root: string;
@@ -45,11 +47,9 @@ export interface BuildOptions {
   out?: string | undefined;
   target?: string | undefined;
   clean?: boolean | undefined;
-}
-
-export interface BuildValues {
-  version: string;
-  build: string;
+  update?: boolean | undefined;
+  mac?: MacSource | undefined;
+  stream?: boolean | undefined;
 }
 
 export interface BuildResult {
@@ -65,121 +65,23 @@ export interface BuildResult {
   checks: Array<{ name: string; ok: boolean; detail: string }>;
 }
 
-function capability(path: string, what: string): void {
-  if (!existsSync(path)) {
+interface RequiredSigning extends SigningStatus {
+  cert: string;
+  profile: string;
+}
+
+async function requireSigning(spec: BuildSpec): Promise<RequiredSigning> {
+  const signing = await signingStatus(spec.team, spec.bundleId);
+
+  if (!signing.ok || signing.profile === undefined || signing.cert === undefined) {
     throw new LipaError({
-      code: 'capability_missing',
-      message: `Missing ${what}: ${path}`,
-      fix: 'Run lipa setup, or set LIPA_SWIFT_TOOLCHAIN to an installed Swift toolchain.',
+      code: 'signing_invalid',
+      message: signing.reason ?? 'Signing is not ready',
+      fix: signing.fix,
     });
   }
-}
 
-function swiftMode(version: string): string {
-  return version.startsWith('6') ? '.v6' : '.v5';
-}
-
-function packageIdentity(spec: BuildSpec, name: string): string {
-  const dependency = spec.packages.find((item) => item.name === name);
-
-  if (dependency?.url !== undefined) {
-    return basename(dependency.url)
-      .replace(/\.git$/, '')
-      .toLowerCase();
-  }
-
-  if (dependency?.path !== undefined) {
-    return basename(dependency.path).toLowerCase();
-  }
-
-  return name.toLowerCase();
-}
-
-function packageManifest(spec: BuildSpec): string {
-  const lines = [
-    '// swift-tools-version: 6.0',
-    'import PackageDescription',
-    '',
-    'let package = Package(',
-    `    name: "${spec.target}App",`,
-    `    platforms: [.iOS(.v${spec.minimumIOS.split('.')[0]})],`,
-    '    products: [',
-    `        .library(name: "${spec.target}", targets: ["${spec.target}"])`,
-    '    ],',
-    '    dependencies: [',
-  ];
-
-  for (const dependency of spec.packages) {
-    if (dependency.kind === 'path' && dependency.path !== undefined) {
-      lines.push(`        .package(path: "${dependency.path}"),`);
-      continue;
-    }
-
-    const requirement =
-      dependency.kind === 'exact'
-        ? `exact: "${dependency.requirement}"`
-        : dependency.kind === 'branch'
-          ? `branch: "${dependency.requirement}"`
-          : dependency.kind === 'revision'
-            ? `revision: "${dependency.requirement}"`
-            : `from: "${dependency.requirement}"`;
-
-    lines.push(`        .package(url: "${dependency.url}", ${requirement}),`);
-  }
-
-  lines.push(
-    '    ],',
-    '    targets: [',
-    '        .target(',
-    `            name: "${spec.target}",`,
-    '            dependencies: [',
-  );
-
-  for (const dependency of spec.packages) {
-    lines.push(
-      `                .product(name: "${dependency.product}", package: "${packageIdentity(spec, dependency.name)}"),`,
-    );
-  }
-
-  lines.push(
-    '            ],',
-    `            path: "Sources/${spec.target}",`,
-    `            swiftSettings: [.swiftLanguageMode(${swiftMode(spec.swiftVersion)})]`,
-    '        )',
-    '    ]',
-    ')',
-    '',
-  );
-
-  return lines.join('\n');
-}
-
-export function writePackage(
-  directory: string,
-  spec: BuildSpec,
-  values: BuildValues,
-  source: string,
-): void {
-  mkdirSync(join(directory, 'Support'), { recursive: true });
-  mkdirSync(join(directory, 'Sources'), { recursive: true });
-  ensureSymlink(join(directory, 'Sources', spec.target), source);
-
-  writeIfChanged(join(directory, 'Package.swift'), packageManifest(spec));
-  writeIfChanged(
-    join(directory, 'xtool.yml'),
-    [
-      'version: 1',
-      `bundleID: ${spec.bundleId}`,
-      'infoPath: Support/Info.plist',
-      'entitlementsPath: Support/entitlements.plist',
-      'skipLSP: true',
-      '',
-    ].join('\n'),
-  );
-  writeIfChanged(
-    join(directory, 'Support', 'Info.plist'),
-    serializePlist(expandPlist(spec, values)),
-  );
+  return { ...signing, cert: signing.cert, profile: signing.profile };
 }
 
 function copyResourceInto(path: string, destination: string): void {
@@ -232,120 +134,47 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
 
 async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<BuildResult> {
   const sdk = readSdk();
-  const prebuilt = checkPrebuilt(spec, sdk.version);
-
-  if (!prebuilt.ok) {
-    throw staleError(prebuilt);
-  }
-
-  const signing = await signingStatus(spec.team, spec.bundleId);
-
-  if (!signing.ok || signing.profile === undefined || signing.cert === undefined) {
-    throw new LipaError({
-      code: 'signing_invalid',
-      message: signing.reason ?? 'Signing is not ready',
-      fix: signing.fix,
-    });
-  }
-
+  const signing = await requireSigning(spec);
   const toolchain = swiftToolchain();
-  const swift = join(toolchain, 'usr', 'bin', 'swift');
   const objcopy = join(toolchain, 'usr', 'bin', 'llvm-objcopy');
-  const xtool = Bun.which('xtool') ?? join(paths().bin, 'xtool');
   const rcodesign = Bun.which('rcodesign') ?? join(paths().bin, 'rcodesign');
 
-  capability(swift, 'the Swift toolchain');
-  capability(objcopy, 'llvm-objcopy');
-  capability(xtool, 'xtool');
-  capability(rcodesign, 'rcodesign');
+  requirePath(objcopy, 'llvm-objcopy');
+  requirePath(rcodesign, 'rcodesign');
   requireCommand('zip');
 
-  const work = join(paths().work, spec.bundleId);
-  const app = join(work, `${spec.target}.app`);
   const values: BuildValues = {
     version: options.version ?? spec.marketingVersion,
     build: resolveBuildNumber(options.build, spec, new Date()),
   };
-  const sourceDirectory = spec.sources[0];
-
-  if (sourceDirectory === undefined) {
-    throw new LipaError({
-      code: 'config_invalid',
-      message: `${spec.root}/project.yml lists no sources directory`,
-    });
-  }
-
-  if (spec.sources.length > 1) {
-    throw new LipaError({
-      code: 'config_invalid',
-      message: 'lipa expects one sources directory per target',
-      fix: 'Point the target at a single folder.',
-    });
-  }
-
-  const packageDirectory = join(
-    work,
-    `package-${shortHash([sourceDirectory, sdk.version, toolchain, SWIFT.version, XTOOL.version])}`,
+  const profile: ProfileInfo = profileInfo(readFileSync(signing.profile), signing.profile);
+  const entitlements: { [key: string]: PlistValue } = mergedEntitlements(
+    readPlist(spec.entitlements),
+    profile,
   );
-
-  if (options.clean === true) {
-    rmSync(packageDirectory, { recursive: true, force: true });
-  }
-
-  writePackage(packageDirectory, spec, values, sourceDirectory);
-
-  const profileBytes = readFileSync(signing.profile);
-  const profile: ProfileInfo = profileInfo(profileBytes, signing.profile);
-  writeEntitlements(
-    mergedEntitlements(readPlist(spec.entitlements), profile),
-    join(packageDirectory, 'Support', 'entitlements.plist'),
-  );
-
-  const compiled = await run([xtool, 'dev', 'build', '--configuration', 'release'], {
-    cwd: packageDirectory,
-    stdout: 'inherit',
-    stderr: 'inherit',
-    env: toolEnvironment(),
+  const prepared = await prepareWorkspace({
+    spec,
+    sdk,
+    values,
+    entitlements,
+    mac: options.mac,
+    clean: options.clean,
+    update: options.update,
+    stream: options.stream,
   });
 
-  if (compiled.exitCode !== 0) {
-    throw new LipaError({
-      code: 'generic',
-      message: `xtool exited with ${compiled.exitCode}`,
-    });
+  if (!prepared.prebuilt.ok) {
+    throw staleError(prepared.prebuilt, 'Run lipa build --mac <host> to refresh the cache.');
   }
 
-  const xtoolApp = join(packageDirectory, 'xtool', `${spec.target}.app`);
+  const work = join(paths().work, spec.bundleId);
+  const app = join(work, `${spec.target}.app`);
 
-  if (!existsSync(xtoolApp)) {
-    throw new LipaError({
-      code: 'generic',
-      message: `xtool did not produce ${xtoolApp}`,
-    });
-  }
-
-  rmSync(app, { recursive: true, force: true });
-  cpSync(xtoolApp, app, { recursive: true });
-  rmSync(join(app, '_CodeSignature'), { recursive: true, force: true });
-
-  for (const file of prebuiltFiles(spec.bundleId)) {
-    cpSync(join(paths().cache, spec.bundleId, file), join(app, file), { recursive: true });
-  }
-
-  for (const resource of spec.resources) {
-    copyResourceInto(resource, app);
-  }
-
-  writeIfChanged(join(app, 'PkgInfo'), 'APPL????');
-  cpSync(signing.profile, join(app, 'embedded.mobileprovision'));
-  mergeInfo(join(app, 'Info.plist'), spec, values);
-
-  const binary = join(app, spec.target);
-  const buffer = readFileSync(binary);
-  patchBuildVersion(buffer, { sdk: sdk.version, minimum: spec.minimumIOS }, binary);
-  writeFileSync(binary, buffer);
+  assemble(prepared, app, spec, values, signing.profile);
+  patchBinary(app, spec, sdk.version);
 
   const symbols = join(paths().symbols, spec.bundleId, `${values.version}-${values.build}`);
+  const binary = join(app, spec.target);
   mkdirSync(symbols, { recursive: true });
   cpSync(binary, join(symbols, spec.target));
 
@@ -357,8 +186,8 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
 
   chmodSync(binary, 0o755);
 
-  const entitlements = join(work, 'entitlements.plist');
-  writeEntitlements(mergedEntitlements(readPlist(spec.entitlements), profile), entitlements);
+  const entitlementsFile = join(work, 'entitlements.plist');
+  writeEntitlements(entitlements, entitlementsFile);
 
   const signed = await run([
     rcodesign,
@@ -368,7 +197,7 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     '--pem-file',
     signingPaths(spec.team).key,
     '--entitlements-xml-file',
-    entitlements,
+    entitlementsFile,
     '--timestamp-url',
     'http://timestamp.apple.com/ts01',
     app,
@@ -378,27 +207,12 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     throw new LipaError({
       code: 'signing_invalid',
       message: `rcodesign exited with ${signed.exitCode}: ${signed.stderr.trim()}`,
-      fix: 'Check the certificate, the key and the profile with lipa signing status.',
+      fix: 'Check the certificate, the key and the profile with lipa doctor.',
     });
   }
 
   const ipa = ipaOutput(spec.root, options.out, spec.name);
-  const payloadRoot = join(work, 'ipa');
-  rmSync(payloadRoot, { recursive: true, force: true });
-  mkdirSync(join(payloadRoot, 'Payload'), { recursive: true });
-  cpSync(app, join(payloadRoot, 'Payload', basename(app)), { recursive: true });
-  rmSync(ipa, { force: true });
-  mkdirSync(join(ipa, '..'), { recursive: true });
-  const zipped = Bun.spawnSync(['zip', '-qry', ipa, 'Payload'], { cwd: payloadRoot });
-
-  if (zipped.exitCode !== 0) {
-    const detail = zipped.stderr.toString().trim() || zipped.stdout.toString().trim();
-
-    throw new LipaError({
-      code: 'generic',
-      message: `zip failed with ${zipped.exitCode}: ${detail}`,
-    });
-  }
+  packageIpa(app, ipa, work);
 
   const inspection = inspectIpa(ipa);
 
@@ -423,4 +237,55 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     symbols: join(symbols, spec.target),
     checks: inspection.checks,
   };
+}
+
+function assemble(
+  prepared: PreparedWorkspace,
+  app: string,
+  spec: BuildSpec,
+  values: BuildValues,
+  profile: string,
+): void {
+  rmSync(app, { recursive: true, force: true });
+  cpSync(prepared.xtoolApp, app, { recursive: true });
+  rmSync(join(app, '_CodeSignature'), { recursive: true, force: true });
+
+  for (const file of prebuiltFiles(spec.bundleId)) {
+    cpSync(join(paths().cache, spec.bundleId, file), join(app, file), { recursive: true });
+  }
+
+  for (const resource of spec.resources) {
+    copyResourceInto(resource, app);
+  }
+
+  writeIfChanged(join(app, 'PkgInfo'), 'APPL????');
+  cpSync(profile, join(app, 'embedded.mobileprovision'));
+  mergeInfo(join(app, 'Info.plist'), spec, values);
+}
+
+function patchBinary(app: string, spec: BuildSpec, sdkVersion: string): void {
+  const binary = join(app, spec.target);
+  const buffer = readFileSync(binary);
+  patchBuildVersion(buffer, { sdk: sdkVersion, minimum: spec.minimumIOS }, binary);
+  writeFileSync(binary, buffer);
+}
+
+function packageIpa(app: string, ipa: string, work: string): void {
+  const payloadRoot = join(work, 'ipa');
+  rmSync(payloadRoot, { recursive: true, force: true });
+  mkdirSync(join(payloadRoot, 'Payload'), { recursive: true });
+  cpSync(app, join(payloadRoot, 'Payload', basename(app)), { recursive: true });
+  rmSync(ipa, { force: true });
+  mkdirSync(join(ipa, '..'), { recursive: true });
+
+  const zipped = Bun.spawnSync(['zip', '-qry', ipa, 'Payload'], { cwd: payloadRoot });
+
+  if (zipped.exitCode !== 0) {
+    const detail = zipped.stderr.toString().trim() || zipped.stdout.toString().trim();
+
+    throw new LipaError({
+      code: 'generic',
+      message: `zip failed with ${zipped.exitCode}: ${detail}`,
+    });
+  }
 }

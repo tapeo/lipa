@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+
 import { LipaError } from '@/core/errors.ts';
 
 export interface RunOptions {
@@ -51,6 +53,16 @@ export function requireCommand(name: string, hint?: string): void {
       code: 'capability_missing',
       message: `Missing ${name}`,
       fix: hint ?? `Install ${name} and run lipa doctor.`,
+    });
+  }
+}
+
+export function requirePath(path: string, what: string, fix?: string): void {
+  if (!existsSync(path)) {
+    throw new LipaError({
+      code: 'capability_missing',
+      message: `Missing ${what}: ${path}`,
+      fix: fix ?? 'Run lipa setup.',
     });
   }
 }

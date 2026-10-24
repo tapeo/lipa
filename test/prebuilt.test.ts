@@ -43,7 +43,7 @@ describe('checkPrebuilt', () => {
     const status = checkPrebuilt(readSpec(fixtures), '27.0');
 
     expect(status.ok).toBe(false);
-    expect(status.fix).toContain('lipa prebuilt');
+    expect(status.fix).toContain('lipa prepare');
   });
 
   test('accepts a cache built from the same assets and SDK', () => {

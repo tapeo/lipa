@@ -25,10 +25,9 @@ function sdkBuild(home: string, sdk: string | undefined): { stdout: string; exit
     env.LIPA_SDK = sdk;
   }
 
-  const result = Bun.spawnSync(
-    ['bun', main, '--json', 'sdk', 'build', '--xcode', join(home, 'Xcode.app')],
-    { env },
-  );
+  const result = Bun.spawnSync(['bun', main, '--json', 'sdk', '--xcode', join(home, 'Xcode.app')], {
+    env,
+  });
 
   return { stdout: result.stdout.toString(), exitCode: result.exitCode };
 }

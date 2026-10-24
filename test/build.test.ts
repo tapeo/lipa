@@ -3,7 +3,8 @@ import { lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ipaOutput, writePackage } from '@/core/build.ts';
+import { ipaOutput } from '@/core/build.ts';
+import { writePackage } from '@/core/prepare.ts';
 import { readSpec } from '@/core/spec.ts';
 
 const fixtures = join(import.meta.dir, '..', 'fixtures');

@@ -12,7 +12,7 @@ import { LipaError } from '@/core/errors.ts';
 import { treeHash } from '@/core/hash.ts';
 import { paths } from '@/core/paths.ts';
 import { type PlistValue, readPlist, serializePlist } from '@/core/plist.ts';
-import { type BuildSpec, readSpec } from '@/core/spec.ts';
+import type { BuildSpec } from '@/core/spec.ts';
 
 export const MAC_KEYS = [
   'BuildMachineOSBuild',
@@ -101,7 +101,7 @@ export function checkPrebuilt(spec: BuildSpec, sdkVersion: string | undefined): 
     return {
       ok: false,
       reason: `No prebuilt cache for ${spec.bundleId}`,
-      fix: 'Run lipa prebuilt --mac <host> on a machine that can reach a Mac with Xcode.',
+      fix: 'Run lipa prepare --mac <host> on a machine that can reach a Mac with Xcode.',
     };
   }
 
@@ -111,8 +111,8 @@ export function checkPrebuilt(spec: BuildSpec, sdkVersion: string | undefined): 
     if (current !== manifest.assetsHash) {
       return {
         ok: false,
-        reason: `${spec.assets} changed since the last prebuilt run`,
-        fix: 'Run lipa prebuilt --mac <host> again.',
+        reason: `${spec.assets} changed since the last prepare`,
+        fix: 'Run lipa prepare --mac <host> again.',
         manifest,
       };
     }
@@ -123,7 +123,7 @@ export function checkPrebuilt(spec: BuildSpec, sdkVersion: string | undefined): 
       return {
         ok: false,
         reason: `The cache for ${spec.bundleId} is missing ${name}`,
-        fix: 'Run lipa prebuilt --mac <host> again.',
+        fix: 'Run lipa prepare --mac <host> again.',
         manifest,
       };
     }
@@ -133,7 +133,7 @@ export function checkPrebuilt(spec: BuildSpec, sdkVersion: string | undefined): 
     return {
       ok: false,
       reason: `The cache was built with the iOS ${manifest.sdkVersion} SDK, the local one is ${sdkVersion}`,
-      fix: 'Run lipa prebuilt --mac <host> again, or rebuild the SDK with lipa sdk build.',
+      fix: 'Run lipa prepare --mac <host> again, or install the matching SDK with lipa sdk.',
       manifest,
     };
   }
@@ -141,20 +141,19 @@ export function checkPrebuilt(spec: BuildSpec, sdkVersion: string | undefined): 
   return { ok: true, manifest };
 }
 
-export function staleError(status: PrebuiltStatus): LipaError {
+export function staleError(status: PrebuiltStatus, fix?: string | undefined): LipaError {
   return new LipaError({
     code: 'prebuilt_stale',
     message: status.reason ?? 'The prebuilt cache is stale',
-    fix: status.fix,
+    fix: fix ?? status.fix,
   });
 }
 
 export function importPrebuilt(
-  root: string,
+  spec: BuildSpec,
   directory: string,
   sdkVersion: string | undefined,
 ): PrebuiltResult {
-  const spec = readSpec(root);
   const info = readPlist(join(directory, 'Info.plist'));
   const values: { [key: string]: PlistValue } = {};
 
@@ -165,7 +164,7 @@ export function importPrebuilt(
       throw new LipaError({
         code: 'prebuilt_stale',
         message: `${directory}/Info.plist has no ${key}`,
-        fix: 'Import a directory produced by a Mac archive or by lipa prebuilt.',
+        fix: 'Import a directory produced by a Mac archive or by lipa prepare.',
       });
     }
 

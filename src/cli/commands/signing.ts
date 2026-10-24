@@ -1,17 +1,13 @@
-import { join } from 'node:path';
-
 import type { CommandSpec } from '@/cli/command.ts';
 import { renderTable } from '@/cli/output.ts';
 import { stringValue } from '@/cli/parser.ts';
 import { LipaError } from '@/core/errors.ts';
-import { paths } from '@/core/paths.ts';
-import { importSigning, signingStatus } from '@/core/signing.ts';
-import { readSpec } from '@/core/spec.ts';
+import { importSigning } from '@/core/signing.ts';
 
 export const signingCommand: CommandSpec = {
   name: 'signing',
   summary: 'Signing identity and provisioning profile',
-  usage: 'lipa signing <import|status> ...',
+  usage: 'lipa signing import ...',
   actions: [
     {
       name: 'import',
@@ -36,6 +32,7 @@ export const signingCommand: CommandSpec = {
           throw new LipaError({
             code: 'usage',
             message: 'Missing --cert, --key or --profile',
+            fix: 'lipa signing import --cert cert.pem --key key.pem --profile App.mobileprovision',
           });
         }
 
@@ -63,32 +60,6 @@ export const signingCommand: CommandSpec = {
               ],
             ),
           ].join('\n'),
-        };
-      },
-    },
-    {
-      name: 'status',
-      summary: 'Check the certificate, the key and the profile of a project',
-      usage: 'lipa signing status [<dir>]',
-      arguments: 1,
-      examples: ['lipa signing status'],
-      async run({ args }) {
-        const root = args.positionals[0] ?? process.cwd();
-        const spec = readSpec(root);
-        const status = await signingStatus(spec.team, spec.bundleId);
-
-        if (!status.ok) {
-          throw new LipaError({
-            code: 'signing_invalid',
-            message: status.reason ?? 'Signing is not ready',
-            fix: status.fix,
-            details: { home: join(paths().signing, spec.team) },
-          });
-        }
-
-        return {
-          data: status,
-          text: `Signing works for ${spec.bundleId}, expires ${status.expires?.slice(0, 10)}`,
         };
       },
     },
