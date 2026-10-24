@@ -1,17 +1,11 @@
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { LipaError } from '@/core/errors.ts';
 import { requireCommand, run } from '@/core/exec.ts';
 import { paths } from '@/core/paths.ts';
 import { type PlistValue, parsePlist, serializePlist } from '@/core/plist.ts';
+import { writeIfChanged } from '@/core/work.ts';
 
 export interface ProfileInfo {
   name: string;
@@ -286,5 +280,5 @@ export function mergedEntitlements(
 }
 
 export function writeEntitlements(value: { [key: string]: PlistValue }, path: string): void {
-  writeFileSync(path, serializePlist(value));
+  writeIfChanged(path, serializePlist(value));
 }

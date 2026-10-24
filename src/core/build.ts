@@ -7,13 +7,13 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { LipaError } from '@/core/errors.ts';
 import { requireCommand, run } from '@/core/exec.ts';
 import { inspectIpa } from '@/core/inspect.ts';
+import { acquireBuildLock } from '@/core/lock.ts';
 import { patchBuildVersion } from '@/core/macho.ts';
 import { paths } from '@/core/paths.ts';
 import { readPlist, serializePlist } from '@/core/plist.ts';
@@ -34,14 +34,22 @@ import {
   writeEntitlements,
 } from '@/core/signing.ts';
 import { type BuildSpec, expandPlist, readSpec } from '@/core/spec.ts';
-import { swiftToolchain, toolEnvironment } from '@/core/tools.ts';
+import { SWIFT, swiftToolchain, toolEnvironment, XTOOL } from '@/core/tools.ts';
+import { resolveBuildNumber } from '@/core/version.ts';
+import { ensureSymlink, shortHash, writeIfChanged } from '@/core/work.ts';
 
 export interface BuildOptions {
   root: string;
-  build: string;
+  build?: string | undefined;
   version?: string | undefined;
   out?: string | undefined;
   target?: string | undefined;
+  clean?: boolean | undefined;
+}
+
+export interface BuildValues {
+  version: string;
+  build: string;
 }
 
 export interface BuildResult {
@@ -146,6 +154,34 @@ function packageManifest(spec: BuildSpec): string {
   return lines.join('\n');
 }
 
+export function writePackage(
+  directory: string,
+  spec: BuildSpec,
+  values: BuildValues,
+  source: string,
+): void {
+  mkdirSync(join(directory, 'Support'), { recursive: true });
+  mkdirSync(join(directory, 'Sources'), { recursive: true });
+  ensureSymlink(join(directory, 'Sources', spec.target), source);
+
+  writeIfChanged(join(directory, 'Package.swift'), packageManifest(spec));
+  writeIfChanged(
+    join(directory, 'xtool.yml'),
+    [
+      'version: 1',
+      `bundleID: ${spec.bundleId}`,
+      'infoPath: Support/Info.plist',
+      'entitlementsPath: Support/entitlements.plist',
+      'skipLSP: true',
+      '',
+    ].join('\n'),
+  );
+  writeIfChanged(
+    join(directory, 'Support', 'Info.plist'),
+    serializePlist(expandPlist(spec, values)),
+  );
+}
+
 function copyResourceInto(path: string, destination: string): void {
   if (!existsSync(path)) {
     throw new LipaError({ code: 'config_invalid', message: `Missing resource: ${path}` });
@@ -161,7 +197,7 @@ function copyResourceInto(path: string, destination: string): void {
   }
 }
 
-function mergeInfo(appPlist: string, spec: BuildSpec, options: BuildOptions): void {
+function mergeInfo(appPlist: string, spec: BuildSpec, values: BuildValues): void {
   const info = readPlist(appPlist);
   const prebuilt = prebuiltInfo(spec.bundleId);
 
@@ -173,10 +209,10 @@ function mergeInfo(appPlist: string, spec: BuildSpec, options: BuildOptions): vo
     }
   }
 
-  info.CFBundleVersion = options.build;
-  info.CFBundleShortVersionString = options.version ?? spec.marketingVersion;
+  info.CFBundleVersion = values.build;
+  info.CFBundleShortVersionString = values.version;
 
-  writeFileSync(appPlist, serializePlist(info));
+  writeIfChanged(appPlist, serializePlist(info));
 }
 
 export function ipaOutput(root: string, out: string | undefined, name: string): string {
@@ -185,6 +221,16 @@ export function ipaOutput(root: string, out: string | undefined, name: string): 
 
 export async function buildIos(options: BuildOptions): Promise<BuildResult> {
   const spec = readSpec(options.root, { target: options.target });
+  const lock = acquireBuildLock(join(paths().work, spec.bundleId, 'build.lock'));
+
+  try {
+    return await buildPackage(options, spec);
+  } finally {
+    lock.release();
+  }
+}
+
+async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<BuildResult> {
   const sdk = readSdk();
   const prebuilt = checkPrebuilt(spec, sdk.version);
 
@@ -215,9 +261,11 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
   requireCommand('zip');
 
   const work = join(paths().work, spec.bundleId);
-  const packageDirectory = join(work, 'package');
   const app = join(work, `${spec.target}.app`);
-  const version = options.version ?? spec.marketingVersion;
+  const values: BuildValues = {
+    version: options.version ?? spec.marketingVersion,
+    build: resolveBuildNumber(options.build, spec, new Date()),
+  };
   const sourceDirectory = spec.sources[0];
 
   if (sourceDirectory === undefined) {
@@ -235,26 +283,16 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
     });
   }
 
-  rmSync(packageDirectory, { recursive: true, force: true });
-  mkdirSync(join(packageDirectory, 'Support'), { recursive: true });
-  mkdirSync(join(packageDirectory, 'Sources'), { recursive: true });
-  symlinkSync(sourceDirectory, join(packageDirectory, 'Sources', spec.target));
+  const packageDirectory = join(
+    work,
+    `package-${shortHash([sourceDirectory, sdk.version, toolchain, SWIFT.version, XTOOL.version])}`,
+  );
 
-  writeFileSync(join(packageDirectory, 'Package.swift'), packageManifest(spec));
-  writeFileSync(
-    join(packageDirectory, 'xtool.yml'),
-    [
-      'version: 1',
-      `bundleID: ${spec.bundleId}`,
-      'infoPath: Support/Info.plist',
-      'entitlementsPath: Support/entitlements.plist',
-      '',
-    ].join('\n'),
-  );
-  writeFileSync(
-    join(packageDirectory, 'Support', 'Info.plist'),
-    serializePlist(expandPlist(spec, { version, build: options.build })),
-  );
+  if (options.clean === true) {
+    rmSync(packageDirectory, { recursive: true, force: true });
+  }
+
+  writePackage(packageDirectory, spec, values, sourceDirectory);
 
   const profileBytes = readFileSync(signing.profile);
   const profile: ProfileInfo = profileInfo(profileBytes, signing.profile);
@@ -298,16 +336,16 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
     copyResourceInto(resource, app);
   }
 
-  writeFileSync(join(app, 'PkgInfo'), 'APPL????');
+  writeIfChanged(join(app, 'PkgInfo'), 'APPL????');
   cpSync(signing.profile, join(app, 'embedded.mobileprovision'));
-  mergeInfo(join(app, 'Info.plist'), spec, { ...options, version });
+  mergeInfo(join(app, 'Info.plist'), spec, values);
 
   const binary = join(app, spec.target);
   const buffer = readFileSync(binary);
   patchBuildVersion(buffer, { sdk: sdk.version, minimum: spec.minimumIOS }, binary);
   writeFileSync(binary, buffer);
 
-  const symbols = join(paths().symbols, spec.bundleId, `${version}-${options.build}`);
+  const symbols = join(paths().symbols, spec.bundleId, `${values.version}-${values.build}`);
   mkdirSync(symbols, { recursive: true });
   cpSync(binary, join(symbols, spec.target));
 
@@ -378,8 +416,8 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
     app,
     binary,
     bytes: Bun.file(ipa).size,
-    version,
-    build: options.build,
+    version: values.version,
+    build: values.build,
     bundleId: spec.bundleId,
     sdk: sdk.version,
     symbols: join(symbols, spec.target),

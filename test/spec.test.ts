@@ -27,6 +27,10 @@ describe('readSpec', () => {
     expect(spec.marketingVersion).toBe('1.0.0');
   });
 
+  test('reads the project build number from the same xcconfig', () => {
+    expect(spec.currentProjectVersion).toBe('1');
+  });
+
   test('separates sources, resources and the asset catalog', () => {
     expect(spec.sources).toEqual([join(fixtures, 'Sources/Sample')]);
     expect(spec.resources).toContain(join(fixtures, 'Resources/JS'));

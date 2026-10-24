@@ -1,29 +1,20 @@
 import type { CommandSpec } from '@/cli/command.ts';
 import { renderTable } from '@/cli/output.ts';
-import { stringValue } from '@/cli/parser.ts';
+import { booleanValue, stringValue } from '@/cli/parser.ts';
 import { buildIos } from '@/core/build.ts';
-
-function defaultBuildNumber(): string {
-  const now = new Date();
-
-  return [
-    now.getUTCFullYear(),
-    String(now.getUTCMonth() + 1).padStart(2, '0'),
-    String(now.getUTCDate()).padStart(2, '0'),
-    String(now.getUTCHours()).padStart(2, '0'),
-    String(now.getUTCMinutes()).padStart(2, '0'),
-    String(now.getUTCSeconds()).padStart(2, '0'),
-  ].join('');
-}
 
 export const buildCommand: CommandSpec = {
   name: 'build',
   summary: 'Build, sign and package an iOS app on Linux',
   usage:
-    'lipa build [<dir>] [--build <number>] [--version <version>] [--out <ipa>] [--target <name>]',
+    'lipa build [<dir>] [--build <number>] [--version <version>] [--out <ipa>] [--target <name>] [--clean]',
   arguments: 1,
   flags: [
-    { name: 'build', value: 'number', description: 'CFBundleVersion, default a UTC timestamp' },
+    {
+      name: 'build',
+      value: 'number',
+      description: 'CFBundleVersion, default CURRENT_PROJECT_VERSION, then a UTC timestamp',
+    },
     {
       name: 'version',
       value: 'version',
@@ -31,17 +22,21 @@ export const buildCommand: CommandSpec = {
     },
     { name: 'out', value: 'ipa', description: 'IPA path, default build/<app>.ipa in the project' },
     { name: 'target', value: 'name', description: 'iOS application target of project.yml' },
+    {
+      name: 'clean',
+      description: 'Throw away the package workspace and compile everything again',
+    },
   ],
-  examples: ['lipa build', 'lipa build --build 42 --out /tmp/App.ipa'],
+  examples: ['lipa build', 'lipa build --build 42 --out /tmp/App.ipa', 'lipa build --clean'],
   async run({ args, output }) {
     const root = args.positionals[0] ?? process.cwd();
-    const build = stringValue(args.values, 'build') ?? defaultBuildNumber();
     const result = await buildIos({
       root,
-      build,
+      build: stringValue(args.values, 'build'),
       version: stringValue(args.values, 'version'),
       out: stringValue(args.values, 'out'),
       target: stringValue(args.values, 'target'),
+      clean: booleanValue(args.values, 'clean'),
     });
 
     const rows = [

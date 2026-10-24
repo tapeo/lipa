@@ -24,7 +24,7 @@ Every command answers JSON when stdout is not a terminal or with `--json`. Witho
 | Code | Meaning |
 |---|---|
 | 0 | ok |
-| 1 | generic error, including `doctor` with a missing piece |
+| 1 | generic error, including `doctor` with a missing piece and `build_in_progress` |
 | 2 | wrong usage |
 | 3 | missing tool or SDK, `capability_missing` |
 | 4 | stale prebuilt cache, `prebuilt_stale` |
@@ -77,14 +77,23 @@ The Mac command receives a tar with the asset catalog and a `run.sh`, runs `xcru
 
 | Flag | Default |
 |---|---|
-| `--build <number>` | a UTC timestamp |
+| `--build <number>` | `CURRENT_PROJECT_VERSION` of the Release xcconfig, then a UTC timestamp |
 | `--version <version>` | `MARKETING_VERSION` of the Release xcconfig |
 | `--out <ipa>` | `build/<app>.ipa` in the project |
 | `--target <name>` | the first iOS application target |
+| `--clean` | off: the package workspace is reused |
 
 A relative `--out` is resolved against the project root, not the directory lipa runs from.
 
-Steps: read the spec, check the prebuilt cache and the signing, write the wrapper package, run `xtool dev build --configuration release`, assemble, patch `LC_BUILD_VERSION`, keep the unstripped binary, strip, sign with `rcodesign`, zip, then run the same checks as `inspect`.
+`CURRENT_PROJECT_VERSION` is read from the target settings of `project.yml` first and from the Release xcconfig after that, the order Xcode uses. App Store Connect refuses a build number lower than one already uploaded for the same marketing version, so after a change of default from the timestamp to a small number, either bump the marketing version or pass `--build` above the last upload.
+
+Steps: read the spec, check the prebuilt cache and the signing, take the build lock, write the wrapper package, run `xtool dev build --configuration release`, assemble, patch `LC_BUILD_VERSION`, keep the unstripped binary, strip, sign with `rcodesign`, zip, then run the same checks as `inspect`.
+
+### Workspace
+
+The wrapper package lives in `~/.lipa/work/<bundle-id>/package-<hash>`, where the hash covers the sources directory and the versions of the SDK, Swift and xtool. lipa keeps that directory between builds and rewrites `Package.swift`, `xtool.yml` and the plists only when their content changes, so SwiftPM and xtool reuse what they compiled. A build after an edit to the app compiles the app module again, not the dependencies; only the first build in a directory compiles everything. `Package.resolved` survives too, so a dependency declared with `from:` stays at the version it resolved to until `--clean`.
+
+One build at a time per bundle id. A second `lipa build` fails with `build_in_progress` and names the pid that holds the lock; a lock whose process is gone is taken over. `--clean` deletes the package workspace and compiles everything again.
 
 ## inspect
 

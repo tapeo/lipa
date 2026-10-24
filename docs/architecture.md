@@ -4,6 +4,9 @@
 src/main.ts          parse, route, envelope
 src/cli/…            commands, help, output
 src/core/spec.ts     project.yml to BuildSpec
+src/core/version.ts  the build number: CURRENT_PROJECT_VERSION, then a timestamp
+src/core/work.ts     package workspace: hashing, write-if-changed, symlinks
+src/core/lock.ts     one build per bundle id
 src/core/build.ts    the pipeline
 src/core/plist.ts    XML plist read and write
 src/core/macho.ts    LC_BUILD_VERSION, LC_UUID, dylibs
@@ -18,14 +21,14 @@ src/core/tools.ts    pinned tools
 
 ## BuildSpec
 
-`readSpec` reads an XcodeGen `project.yml` and returns what the build needs: target, product name, bundle id, team, iOS deployment target, marketing version from the Release xcconfig, Info.plist, entitlements, asset catalog, resources, sources and package dependencies. It stops with `config_invalid` and the missing key when something is absent.
+`readSpec` reads an XcodeGen `project.yml` and returns what the build needs: target, product name, bundle id, team, iOS deployment target, the marketing version and the project build number from the Release xcconfig, Info.plist, entitlements, asset catalog, resources, sources and package dependencies. It stops with `config_invalid` and the missing key when something is absent.
 
 `expandPlist` replaces `$(SETTING)` in the Info.plist with the settings from `project.yml` plus the five the build provides: `EXECUTABLE_NAME`, `PRODUCT_NAME`, `PRODUCT_BUNDLE_IDENTIFIER`, `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`. An unknown setting stops the build: xtool would otherwise write the literal string into the bundle.
 
 ## Pipeline
 
-1. `readSpec`, `readSdk`, `checkPrebuilt`, `signingStatus`. Each failure exits with its own code.
-2. Wrapper package in `~/.lipa/work/<bundle-id>/package`: a `Package.swift` with the project packages, one target pointing at the sources through a symlink, `xtool.yml`, the expanded Info.plist and the entitlements.
+1. `readSpec`, take the build lock, `readSdk`, `checkPrebuilt`, `signingStatus`. Each failure exits with its own code.
+2. Wrapper package in `~/.lipa/work/<bundle-id>/package-<hash>`: a `Package.swift` with the project packages, one target pointing at the sources through a symlink, `xtool.yml`, the expanded Info.plist and the entitlements. The hash covers the sources directory and the versions of the SDK, Swift and xtool. The directory survives between builds and each generated file is written only when its content changes, so SwiftPM keeps its manifest cache, its checkouts and its object files. `--clean` deletes the directory first.
 3. `xtool dev build --configuration release`, with the Swift toolchain first on `PATH`.
 4. Assemble: copy the app, drop `_CodeSignature`, add the cached `Assets.car` and icons, copy the resource folders flat, write `PkgInfo`, embed the profile, merge the Xcode plist keys.
 5. Patch `LC_BUILD_VERSION` with the SDK version, copy the binary to `~/.lipa/symbols`, strip, `chmod 755`.
@@ -46,7 +49,7 @@ The Mac side is a shell script generated from the spec and sent with a tar. It n
 
 The profile is a CMS envelope with an XML plist inside: `profileInfo` finds the plist, reads the team, the bundle id, the expiry and the entitlements. `importSigning` checks the public key of the certificate against the private key with `openssl`, checks the expiry, and stores the files mode 600 under `~/.lipa/signing/<team>`.
 
-`rcodesign` signs with `--pem-file` for the certificate and the key, the merged entitlements, and Apple's timestamp server. There is no dSYM, because the Linux toolchain has no `dsymutil`; the unstripped binary keeps the same UUID and symbolication can use it.
+`rcodesign` signs with `--pem-file` for the certificate and the key, the merged entitlements, and Apple's timestamp server. The build writes a dSYM next to the app, but lipa does not ship it: `~/.lipa/symbols/<bundle-id>/<version>-<build>` keeps the unstripped binary, which carries the same UUID. Two builds with the same version and build number write to the same folder, so raise the number before building again if you still need the symbols of an uploaded build.
 
 ## Why the SDK patch
 

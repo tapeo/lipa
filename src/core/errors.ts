@@ -6,6 +6,7 @@ export const ERROR_CODES = [
   'signing_invalid',
   'ipa_invalid',
   'remote_unreachable',
+  'build_in_progress',
   'usage',
   'generic',
 ] as const;
@@ -34,6 +35,7 @@ const EXIT_CODE_BY_ERROR: Record<ErrorCode, ExitCode> = {
   signing_invalid: EXIT_CODES.signing_invalid,
   ipa_invalid: EXIT_CODES.ipa_invalid,
   remote_unreachable: EXIT_CODES.remote_unreachable,
+  build_in_progress: EXIT_CODES.generic,
   usage: EXIT_CODES.usage,
   generic: EXIT_CODES.generic,
 };

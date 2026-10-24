@@ -66,7 +66,7 @@ Support/Prebuilt ◄── actool on a Mac             ▼
                           patch LC_BUILD_VERSION, sign with rcodesign, zip
 ```
 
-- The wrapper package lives in `~/.lipa/work/<bundle-id>` and points at the project sources with a symlink. The project stays an XcodeGen project.
+- The wrapper package lives in `~/.lipa/work/<bundle-id>` and points at the project sources with a symlink, so the project stays an XcodeGen project. lipa keeps it between builds and rewrites only what changed, so an edit to the app recompiles the app, not its dependencies.
 - `LC_BUILD_VERSION` carries the deployment target in its SDK field, and App Store Connect rejects that as an old SDK. lipa patches it to the SDK version it linked against, before signing.
 - Signing needs `cert.pem`, `key.pem` and a profile whose `application-identifier` matches the project. `lipa signing status` checks the three against each other.
 - `actool` output is cached per bundle id with a hash of the asset catalog, the Xcode build and the SDK version. A stale cache stops the build with `prebuilt_stale`, it does not build something different from what the Mac would.

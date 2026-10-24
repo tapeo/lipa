@@ -21,6 +21,7 @@ export interface BuildSpec {
   team: string;
   minimumIOS: string;
   marketingVersion: string;
+  currentProjectVersion: string | undefined;
   swiftVersion: string;
   infoPlist: string;
   entitlements: string;
@@ -79,7 +80,11 @@ function stringMap(value: unknown): Record<string, string> {
   return settings;
 }
 
-function readMarketingVersion(root: string, configPath: string | undefined): string | undefined {
+function readConfigValue(
+  root: string,
+  configPath: string | undefined,
+  key: string,
+): string | undefined {
   if (configPath === undefined) {
     return undefined;
   }
@@ -90,7 +95,8 @@ function readMarketingVersion(root: string, configPath: string | undefined): str
     return undefined;
   }
 
-  const match = readFileSync(path, 'utf8').match(/^\s*MARKETING_VERSION\s*=\s*([^\s;]+)\s*;?\s*$/m);
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*([^\\s;]+)\\s*;?\\s*$`, 'm');
+  const match = readFileSync(path, 'utf8').match(pattern);
 
   return match?.[1];
 }
@@ -280,7 +286,7 @@ export function readSpec(root: string, options: ReadSpecOptions = {}): BuildSpec
 
   const configFiles = record(target.configFiles) ?? {};
   const releaseConfig = text(configFiles.Release);
-  const marketingVersion = readMarketingVersion(root, releaseConfig);
+  const marketingVersion = readConfigValue(root, releaseConfig, 'MARKETING_VERSION');
 
   if (marketingVersion === undefined) {
     throw invalid(
@@ -289,6 +295,10 @@ export function readSpec(root: string, options: ReadSpecOptions = {}): BuildSpec
       'Set configFiles.Release in project.yml to an xcconfig with MARKETING_VERSION.',
     );
   }
+
+  const currentProjectVersion =
+    settings.CURRENT_PROJECT_VERSION ??
+    readConfigValue(root, releaseConfig, 'CURRENT_PROJECT_VERSION');
 
   const infoPlistPath = settings.INFOPLIST_FILE;
 
@@ -321,6 +331,7 @@ export function readSpec(root: string, options: ReadSpecOptions = {}): BuildSpec
     team: settings.DEVELOPMENT_TEAM,
     minimumIOS,
     marketingVersion,
+    currentProjectVersion,
     swiftVersion: settings.SWIFT_VERSION ?? '5.0',
     infoPlist,
     entitlements: resolve(root, entitlementsPath),
