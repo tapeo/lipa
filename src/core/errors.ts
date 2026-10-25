@@ -6,6 +6,7 @@ export const ERROR_CODES = [
   'signing_invalid',
   'ipa_invalid',
   'remote_unreachable',
+  'device_unreachable',
   'build_in_progress',
   'usage',
   'generic',
@@ -23,6 +24,7 @@ export const EXIT_CODES = {
   signing_invalid: 6,
   ipa_invalid: 7,
   remote_unreachable: 8,
+  device_unreachable: 9,
 } as const;
 
 export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
@@ -35,6 +37,7 @@ const EXIT_CODE_BY_ERROR: Record<ErrorCode, ExitCode> = {
   signing_invalid: EXIT_CODES.signing_invalid,
   ipa_invalid: EXIT_CODES.ipa_invalid,
   remote_unreachable: EXIT_CODES.remote_unreachable,
+  device_unreachable: EXIT_CODES.device_unreachable,
   build_in_progress: EXIT_CODES.generic,
   usage: EXIT_CODES.usage,
   generic: EXIT_CODES.generic,

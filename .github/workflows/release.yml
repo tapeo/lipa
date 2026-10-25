@@ -26,7 +26,8 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          sha256sum lipa-linux-x64 lipa-linux-arm64 > checksums.txt
+          cp ../device/lipa_device.py ../device/requirements.txt .
+          sha256sum lipa-linux-x64 lipa-linux-arm64 lipa_device.py requirements.txt > checksums.txt
           ./lipa-linux-x64 --version
       - name: Publish
         env:
@@ -37,6 +38,8 @@ jobs:
             dist/lipa-linux-x64 \
             dist/lipa-linux-arm64 \
             dist/checksums.txt \
+            dist/lipa_device.py \
+            dist/requirements.txt \
             install.sh \
             --title "lipa $version" \
             --generate-notes

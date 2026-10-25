@@ -34,7 +34,7 @@ describe('cli', () => {
   test('documents the actions of a command', () => {
     const result = lipa(['signing', '--help']);
 
-    expect(result.stdout).toContain('Import a distribution certificate');
+    expect(result.stdout).toContain('Import a signing certificate');
   });
 
   test('documents the transport flags of prepare', () => {
@@ -78,6 +78,26 @@ describe('cli', () => {
 
     expect(result.exitCode).toBe(3);
     expect(JSON.parse(result.stdout).error.code).toBe('capability_missing');
+  });
+
+  test('documents the signing kind of build', () => {
+    const result = lipa(['build', '--help']);
+
+    expect(result.stdout).toContain('--signing');
+  });
+
+  test('asks for a device in run', () => {
+    const result = lipa(['--json', 'run']);
+
+    expect(result.exitCode).toBe(2);
+    expect(JSON.parse(result.stdout).error.fix).toContain('lipa run --device');
+  });
+
+  test('documents the flags of run', () => {
+    const result = lipa(['run', '--help']);
+
+    expect(result.stdout).toContain('--device');
+    expect(result.stdout).toContain('--logs');
   });
 
   test('reads the version flag of update, not the global one', () => {

@@ -32,6 +32,7 @@ Every command answers JSON when stdout is not a terminal or with `--json`. Witho
 | 6 | signing problem, `signing_invalid` |
 | 7 | IPA that fails `inspect`, `ipa_invalid` |
 | 8 | the Mac command failed, `remote_unreachable` |
+| 9 | the device did not answer, `device_unreachable` |
 
 ## The ladder
 
@@ -45,6 +46,7 @@ Each command assumes the one before it, and the project commands run the earlier
 | compile | `lipa prepare` |
 | IPA | `lipa build` |
 | check | `lipa inspect` |
+| device | `lipa setup --only device`, or the first `lipa run` |
 
 ## setup
 
@@ -53,6 +55,8 @@ Each command assumes the one before it, and the project commands run the earlier
 | `lipa setup` | `--force` installs again, `--only <tool>` installs one |
 
 Installs Swift 6.4.1 for Ubuntu 24.04, xtool 1.23.0 and rcodesign 0.29.0 under `~/.lipa`, each checked against a sha256 pinned in `src/core/tools.ts`.
+
+`--only uv` installs uv 0.13.5, the tool that creates the Python environment of the device helper. `--only device` installs uv, copies `lipa_device.py` and `requirements.txt` into `~/.lipa/tools/device`, creates a Python 3.13 environment with uv and installs the packages with the hashes in `requirements.txt`. The helper needs pymobiledevice3 and runs in its own process, so a machine that only builds takes none of it: `run` installs the same thing on its first use, and `doctor` reports it as skipped until then. From a checkout the files come from `device/`; from a released binary they come from the release assets of the same version. `LIPA_DEVICE_DIR` names the folder by hand.
 
 ## sdk
 
@@ -69,7 +73,32 @@ The first form runs `xtool sdk install`, which writes to `~/.swiftpm/swift-sdks/
 |---|---|
 | `lipa signing import` | `--cert`, `--key`, `--profile`, `--team` |
 
-`import` checks that the certificate and the key match, that the certificate is valid, and that the profile is for the bundle id of the profile. It stores the three files in `~/.lipa/signing/<team>`, mode 600. `lipa doctor` reports the state of the identity.
+`import` checks that the certificate and the key match, that the certificate is valid, and that the profile is for the bundle id of the profile. The profile decides the kind: one with `ProvisionedDevices` and `get-task-allow` is `development`, one without devices is `app-store`. Ad hoc profiles are refused. The certificate has to match the kind: Developer or iPhone Developer for development, Distribution for App Store.
+
+The App Store identity lives in `~/.lipa/signing/<team>`, the development one in `~/.lipa/signing/<team>/development`, both mode 600. `lipa doctor` reports both; the development line is skipped when there is no development identity.
+
+## run
+
+| Flag | Default |
+|---|---|
+| `--device <host>` | required, the address or the tailnet name of the device |
+| `--port <n>` | searched between 49152 and 49407 |
+| `--udid <udid>` | the only device of the development profile |
+| `--ipa <path>` | build a development IPA first |
+| `--logs app\|all\|none` | `app` on a terminal, `none` with `--json` |
+| `--mac`, `--via`, `--update`, `--clean` | as in `build` |
+
+`run` installs the device helper and its Python environment when they are missing, with the same steps as `lipa setup --only device`. `prepare` does not: it compiles the app and leaves the device alone.
+
+`run` builds with `--signing development` unless `--ipa` is given, checks that the IPA carries a development profile that lists the device, then installs it, mounts the personalized developer image when it is missing, launches the bundle id and follows its log entries until Ctrl-C. `all` keeps every process entry, `app` only the entries of the bundle id.
+
+The device is reached through its RemotePairing service, so a network address works: no USB cable, no Mac, no root. The pairing record is made once on a machine with the device attached:
+
+```
+pymobiledevice3 lockdown remotepairing --pair --udid <udid>
+```
+
+The record is `~/.pymobiledevice3/remote_<udid>.plist` on the machine that runs `lipa run`. When it was made elsewhere, add `host_identifier`, the value of `pymobiledevice3.pair_records.generate_host_id()` on that machine, to the plist. Clearing the trusted computers on the device revokes the record.
 
 ## prepare
 
@@ -109,9 +138,10 @@ One run at a time per bundle id. A second `prepare` or `build` fails with `build
 | `--version <version>` | `MARKETING_VERSION` of the Release xcconfig |
 | `--out <ipa>` | `build/<app>.ipa` in the project |
 | `--target <name>` | the first iOS application target |
+| `--signing app-store\|development` | `app-store` |
 | `--update`, `--clean` | as in `prepare` |
 
-A relative `--out` is resolved against the project root, not the directory lipa runs from.
+A relative `--out` is resolved against the project root, not the directory lipa runs from. A development build defaults to `build/<app>-development.ipa`, so it never overwrites the App Store one.
 
 `CURRENT_PROJECT_VERSION` is read from the target settings of `project.yml` first and from the Release xcconfig after that, the order Xcode uses. App Store Connect refuses a build number lower than one already uploaded for the same marketing version, so after a change of default from the timestamp to a small number, either bump the marketing version or pass `--build` above the last upload.
 

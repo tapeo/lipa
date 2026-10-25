@@ -3,12 +3,13 @@ import { renderTable } from '@/cli/output.ts';
 import { booleanValue, stringValue } from '@/cli/parser.ts';
 import { buildIos } from '@/core/build.ts';
 import { macSource } from '@/core/prepare.ts';
+import { signingKind } from '@/core/signing.ts';
 
 export const buildCommand: CommandSpec = {
   name: 'build',
   summary: 'Build, sign and package an iOS app on Linux',
   usage:
-    'lipa build [<dir>] [--mac <host> | --via <command>] [--build <number>] [--version <version>] [--out <ipa>] [--target <name>] [--update] [--clean]',
+    'lipa build [<dir>] [--mac <host> | --via <command>] [--signing app-store|development] [--build <number>] [--version <version>] [--out <ipa>] [--target <name>] [--update] [--clean]',
   arguments: 1,
   flags: [
     {
@@ -30,6 +31,11 @@ export const buildCommand: CommandSpec = {
     { name: 'out', value: 'ipa', description: 'IPA path, default build/<app>.ipa in the project' },
     { name: 'target', value: 'name', description: 'iOS application target of project.yml' },
     {
+      name: 'signing',
+      value: 'kind',
+      description: 'Signing identity: app-store or development, default app-store',
+    },
+    {
       name: 'update',
       description: 'Resolve the package dependencies again without compiling everything',
     },
@@ -38,10 +44,16 @@ export const buildCommand: CommandSpec = {
       description: 'Throw away the package workspace and compile everything again',
     },
   ],
-  examples: ['lipa build', 'lipa build --mac macbook', 'lipa build --build 42 --out /tmp/App.ipa'],
+  examples: [
+    'lipa build',
+    'lipa build --mac macbook',
+    'lipa build --signing development',
+    'lipa build --build 42 --out /tmp/App.ipa',
+  ],
   async run({ args, output }) {
     const root = args.positionals[0] ?? process.cwd();
     const result = await buildIos({
+      signing: signingKind(stringValue(args.values, 'signing')),
       root,
       build: stringValue(args.values, 'build'),
       version: stringValue(args.values, 'version'),
@@ -61,6 +73,7 @@ export const buildCommand: CommandSpec = {
       { name: 'Size', value: `${(result.bytes / 1_000_000).toFixed(1)} MB` },
       { name: 'Version', value: `${result.version} (${result.build})` },
       { name: 'Bundle id', value: result.bundleId },
+      { name: 'Signing', value: result.signing },
       { name: 'SDK', value: `iOS ${result.sdk}` },
       { name: 'Symbols', value: result.symbols },
     ];

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Check } from '@/core/checks.ts';
+import { deviceReady } from '@/core/device.ts';
 import { LipaError } from '@/core/errors.ts';
 import { commandVersion } from '@/core/exec.ts';
 import { checkMac } from '@/core/mac.ts';
@@ -10,7 +11,7 @@ import { checkPrebuilt } from '@/core/prebuilt.ts';
 import { packageDirectory, workspaceWarm } from '@/core/prepare.ts';
 import { remoteSource } from '@/core/remote.ts';
 import { readSdk } from '@/core/sdk.ts';
-import { signingStatus } from '@/core/signing.ts';
+import { signingPaths, signingStatus } from '@/core/signing.ts';
 import { readSpec } from '@/core/spec.ts';
 import { swiftToolchain } from '@/core/tools.ts';
 
@@ -85,9 +86,33 @@ async function projectChecks(root: string, sdkVersion: string): Promise<DoctorCh
   checks.push({
     name: 'signing',
     ok: signing.ok,
-    detail: signing.ok ? `expires ${signing.expires?.slice(0, 10)}` : (signing.reason ?? ''),
+    detail: signing.ok
+      ? `app-store, expires ${signing.expires?.slice(0, 10)}`
+      : (signing.reason ?? ''),
     fix: signing.ok ? undefined : signing.fix,
   });
+
+  const development = signingPaths(spec.team, 'development');
+
+  if (existsSync(development.cert)) {
+    const status = await signingStatus(spec.team, spec.bundleId, 'development');
+
+    checks.push({
+      name: 'signing_development',
+      ok: status.ok,
+      detail: status.ok
+        ? `development, expires ${status.expires?.slice(0, 10)}`
+        : (status.reason ?? ''),
+      fix: status.ok ? undefined : status.fix,
+    });
+  } else {
+    checks.push({
+      name: 'signing_development',
+      ok: true,
+      skipped: true,
+      detail: 'no development identity, run lipa signing import with a development profile',
+    });
+  }
 
   return checks;
 }
@@ -121,6 +146,17 @@ export async function doctor(
   ] as const) {
     checks.push({ name, ok: Bun.which(name) !== null, detail: Bun.which(name) ?? hint });
   }
+
+  const device = deviceReady();
+
+  checks.push({
+    name: 'device',
+    ok: true,
+    skipped: !device.ok,
+    detail: device.ok
+      ? 'device helper installed, lipa run can reach a device'
+      : `${device.reason}, lipa run installs it on the first use`,
+  });
 
   let sdkVersion: string | undefined;
 

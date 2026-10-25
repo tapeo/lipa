@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { inspectIpa } from '@/core/inspect.ts';
+import { inspectIpa, ipaProfile } from '@/core/inspect.ts';
 import { serializePlist } from '@/core/plist.ts';
 import { MAC_KEYS } from '@/core/prebuilt.ts';
 
@@ -39,7 +39,7 @@ function profile(): string {
 </dict></plist>`;
 }
 
-function makeIpa(mode: number): string {
+function makeIpa(mode: number, contents = profile()): string {
   rmSync(join(work, 'Payload'), { recursive: true, force: true });
   mkdirSync(join(app, '_CodeSignature'), { recursive: true });
   const keys = Object.fromEntries(MAC_KEYS.map((key) => [key, 'x']));
@@ -58,10 +58,10 @@ function makeIpa(mode: number): string {
   chmodSync(join(app, 'Sample'), mode);
   writeFileSync(join(app, 'Assets.car'), 'car');
   writeFileSync(join(app, 'PkgInfo'), 'APPL????');
-  writeFileSync(join(app, 'embedded.mobileprovision'), profile());
+  writeFileSync(join(app, 'embedded.mobileprovision'), contents);
   writeFileSync(join(app, '_CodeSignature', 'CodeResources'), 'plist');
 
-  const ipa = join(work, `Sample-${mode}.ipa`);
+  const ipa = join(work, `Sample-${mode}-${contents.length}.ipa`);
   Bun.spawnSync(['zip', '-qry', ipa, 'Payload'], { cwd: work });
 
   return ipa;
@@ -87,5 +87,29 @@ describe('inspectIpa', () => {
       'sdk 27.0',
     );
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('ipaProfile', () => {
+  const development = profile()
+    .replace(
+      '<key>ExpirationDate</key>',
+      '<key>ProvisionedDevices</key><array><string>00008150-0000000000000001</string></array><key>ExpirationDate</key>',
+    )
+    .replace(
+      '<key>application-identifier</key><string>ABCDE12345.com.example.sample</string>',
+      '<key>application-identifier</key><string>ABCDE12345.com.example.sample</string><key>get-task-allow</key><true/>',
+    )
+    .replace('Sample App Store', 'Sample Development');
+
+  test('reports the kind and the devices of the embedded profile', () => {
+    const info = ipaProfile(makeIpa(0o755, development));
+
+    expect(info.kind).toBe('development');
+    expect(info.devices).toEqual(['00008150-0000000000000001']);
+  });
+
+  test('reports an App Store profile as such', () => {
+    expect(ipaProfile(makeIpa(0o755)).kind).toBe('app-store');
   });
 });

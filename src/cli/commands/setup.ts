@@ -1,114 +1,23 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
-
 import type { CommandSpec } from '@/cli/command.ts';
+import { installDevice } from '@/core/device.ts';
 import { LipaError } from '@/core/errors.ts';
-import { run } from '@/core/exec.ts';
-import { fileHash } from '@/core/hash.ts';
+import { installTool } from '@/core/install.ts';
 import { paths } from '@/core/paths.ts';
-import { type PinnedTool, TOOLS } from '@/core/tools.ts';
-
-async function download(url: string, path: string): Promise<void> {
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new LipaError({
-      code: 'capability_missing',
-      message: `Cannot download ${url}: ${response.status}`,
-    });
-  }
-
-  await Bun.write(path, response);
-}
-
-function installedMarker(tool: PinnedTool): string {
-  return join(paths().tools, `.${tool.name}-${tool.version}`);
-}
-
-async function install(tool: PinnedTool, force: boolean): Promise<string> {
-  const marker = installedMarker(tool);
-
-  if (!force && existsSync(marker)) {
-    return `${tool.name} ${tool.version} already installed`;
-  }
-
-  const directory = paths().tools;
-  mkdirSync(directory, { recursive: true });
-
-  const downloadPath = join(directory, `${tool.name}.download`);
-  await download(tool.url, downloadPath);
-
-  const mismatch = (actual: string): LipaError => {
-    rmSync(downloadPath, { force: true });
-
-    return new LipaError({
-      code: 'capability_missing',
-      message: `${tool.name}: sha256 ${actual}, expected ${tool.sha256}`,
-      fix: 'Check the pinned version in src/core/tools.ts.',
-    });
-  };
-
-  if (tool.hashOf === 'archive') {
-    const hash = fileHash(downloadPath);
-
-    if (hash !== tool.sha256) {
-      throw mismatch(hash);
-    }
-  }
-
-  if (tool.archive === 'binary') {
-    const target = join(paths().bin, tool.binary);
-    mkdirSync(paths().bin, { recursive: true });
-    Bun.spawnSync(['cp', downloadPath, target]);
-    chmodSync(target, 0o755);
-  } else {
-    const untar = await run(['tar', '-xzf', downloadPath, '-C', directory]);
-
-    if (untar.exitCode !== 0) {
-      throw new LipaError({
-        code: 'capability_missing',
-        message: `Cannot extract ${tool.name}: ${untar.stderr}`,
-      });
-    }
-
-    const extracted = join(directory, tool.binary);
-
-    if (!existsSync(extracted)) {
-      throw new LipaError({
-        code: 'capability_missing',
-        message: `${tool.name}: the archive has no ${tool.binary}`,
-        fix: 'Check the pinned version in src/core/tools.ts.',
-      });
-    }
-
-    if (tool.hashOf === 'binary') {
-      const hash = fileHash(extracted);
-
-      if (hash !== tool.sha256) {
-        throw mismatch(hash);
-      }
-
-      mkdirSync(paths().bin, { recursive: true });
-      copyFileSync(extracted, join(paths().bin, basename(tool.binary)));
-      chmodSync(join(paths().bin, basename(tool.binary)), 0o755);
-    }
-  }
-
-  rmSync(downloadPath, { force: true });
-  writeFileSync(marker, `${tool.version}\n`);
-
-  return `${tool.name} ${tool.version} installed`;
-}
+import { DEVICE_TOOLS, TOOLS } from '@/core/tools.ts';
 
 export const setupCommand: CommandSpec = {
   name: 'setup',
   summary: 'Install the pinned tools lipa needs',
-  usage: 'lipa setup [--force]',
+  usage: 'lipa setup [--force] [--only <tool>]',
   flags: [
     { name: 'force', description: 'Install again' },
-    { name: 'only', value: 'tool', description: 'Install one tool, repeatable' },
+    {
+      name: 'only',
+      value: 'tool',
+      description: 'Install one tool or the device helper, repeatable',
+    },
   ],
-  examples: ['lipa setup'],
+  examples: ['lipa setup', 'lipa setup --only device'],
   async run({ args, output }) {
     if (process.arch !== 'x64') {
       throw new LipaError({
@@ -122,13 +31,28 @@ export const setupCommand: CommandSpec = {
 
     const only = args.values.only;
     const wanted = new Set(Array.isArray(only) ? only : typeof only === 'string' ? [only] : []);
+    const selected = [...TOOLS, ...DEVICE_TOOLS].filter(
+      (item) => wanted.size === 0 || wanted.has(item.name),
+    );
 
-    for (const tool of TOOLS.filter((item) => wanted.size === 0 || wanted.has(item.name))) {
-      const line = await install(tool, args.values.force === true);
+    for (const tool of selected) {
+      const line = await installTool(tool, args.values.force === true);
       lines.push(line);
 
       if (!output.json) {
         process.stdout.write(`${line}\n`);
+      }
+    }
+
+    if (wanted.has('device')) {
+      const device = await installDevice();
+
+      for (const step of device.steps) {
+        lines.push(step);
+
+        if (!output.json) {
+          process.stdout.write(`${step}\n`);
+        }
       }
     }
 

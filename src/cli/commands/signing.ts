@@ -11,13 +11,21 @@ export const signingCommand: CommandSpec = {
   actions: [
     {
       name: 'import',
-      summary: 'Import a distribution certificate, its key and a profile',
+      summary: 'Import a signing certificate, its key and a profile',
       usage:
         'lipa signing import --cert <pem> --key <pem> --profile <.mobileprovision> [--team <id>]',
       flags: [
-        { name: 'cert', value: 'path', description: 'Distribution certificate in PEM' },
+        {
+          name: 'cert',
+          value: 'path',
+          description: 'Development or distribution certificate in PEM',
+        },
         { name: 'key', value: 'path', description: 'Private key in PEM, mode 600' },
-        { name: 'profile', value: 'path', description: 'App Store provisioning profile' },
+        {
+          name: 'profile',
+          value: 'path',
+          description: 'App Store or development profile, which decides the kind',
+        },
         { name: 'team', value: 'id', description: 'Check the team of the profile' },
       ],
       examples: [
@@ -50,6 +58,7 @@ export const signingCommand: CommandSpec = {
             renderTable(
               [
                 { name: 'Bundle id', value: result.bundleId },
+                { name: 'Kind', value: result.kind },
                 { name: 'Profile', value: result.profile },
                 { name: 'Certificate', value: result.cert },
                 { name: 'Expires', value: result.expires.slice(0, 10) },

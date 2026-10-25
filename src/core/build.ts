@@ -30,6 +30,7 @@ import {
   mergedEntitlements,
   type ProfileInfo,
   profileInfo,
+  type SigningKind,
   type SigningStatus,
   signingPaths,
   signingStatus,
@@ -50,6 +51,7 @@ export interface BuildOptions {
   update?: boolean | undefined;
   mac?: MacSource | undefined;
   stream?: boolean | undefined;
+  signing?: SigningKind | undefined;
 }
 
 export interface BuildResult {
@@ -60,6 +62,7 @@ export interface BuildResult {
   version: string;
   build: string;
   bundleId: string;
+  signing: SigningKind;
   sdk: string;
   symbols: string;
   checks: Array<{ name: string; ok: boolean; detail: string }>;
@@ -70,8 +73,8 @@ interface RequiredSigning extends SigningStatus {
   profile: string;
 }
 
-async function requireSigning(spec: BuildSpec): Promise<RequiredSigning> {
-  const signing = await signingStatus(spec.team, spec.bundleId);
+async function requireSigning(spec: BuildSpec, kind: SigningKind): Promise<RequiredSigning> {
+  const signing = await signingStatus(spec.team, spec.bundleId, kind);
 
   if (!signing.ok || signing.profile === undefined || signing.cert === undefined) {
     throw new LipaError({
@@ -117,8 +120,15 @@ function mergeInfo(appPlist: string, spec: BuildSpec, values: BuildValues): void
   writeIfChanged(appPlist, serializePlist(info));
 }
 
-export function ipaOutput(root: string, out: string | undefined, name: string): string {
-  return resolve(root, out ?? join('build', `${name}.ipa`));
+export function ipaOutput(
+  root: string,
+  out: string | undefined,
+  name: string,
+  kind: SigningKind = 'app-store',
+): string {
+  const suffix = kind === 'development' ? '-development' : '';
+
+  return resolve(root, out ?? join('build', `${name}${suffix}.ipa`));
 }
 
 export async function buildIos(options: BuildOptions): Promise<BuildResult> {
@@ -134,7 +144,8 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
 
 async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<BuildResult> {
   const sdk = readSdk();
-  const signing = await requireSigning(spec);
+  const kind: SigningKind = options.signing ?? 'app-store';
+  const signing = await requireSigning(spec, kind);
   const toolchain = swiftToolchain();
   const objcopy = join(toolchain, 'usr', 'bin', 'llvm-objcopy');
   const rcodesign = Bun.which('rcodesign') ?? join(paths().bin, 'rcodesign');
@@ -195,7 +206,7 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     '--pem-file',
     signing.cert,
     '--pem-file',
-    signingPaths(spec.team).key,
+    signingPaths(spec.team, kind).key,
     '--entitlements-xml-file',
     entitlementsFile,
     '--timestamp-url',
@@ -211,7 +222,7 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     });
   }
 
-  const ipa = ipaOutput(spec.root, options.out, spec.name);
+  const ipa = ipaOutput(spec.root, options.out, spec.name, kind);
   packageIpa(app, ipa, work);
 
   const inspection = inspectIpa(ipa);
@@ -233,6 +244,7 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     version: values.version,
     build: values.build,
     bundleId: spec.bundleId,
+    signing: kind,
     sdk: sdk.version,
     symbols: join(symbols, spec.target),
     checks: inspection.checks,

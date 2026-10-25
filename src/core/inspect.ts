@@ -4,7 +4,7 @@ import { LipaError } from '@/core/errors.ts';
 import { parseMachO } from '@/core/macho.ts';
 import { readPlist } from '@/core/plist.ts';
 import { MAC_KEYS } from '@/core/prebuilt.ts';
-import { profileInfo } from '@/core/signing.ts';
+import { type ProfileInfo, profileInfo } from '@/core/signing.ts';
 import type { ZipEntry } from '@/core/zip.ts';
 import { readZip, readZipEntry } from '@/core/zip.ts';
 
@@ -21,6 +21,21 @@ export interface Inspection {
 
 function find(entries: ZipEntry[], suffix: string): ZipEntry | undefined {
   return entries.find((entry) => entry.name.endsWith(suffix));
+}
+
+export function ipaProfile(ipa: string): ProfileInfo {
+  const buffer = readFileSync(ipa);
+  const entries = readZip(buffer, ipa);
+  const entry = entries.find((item) => item.name.endsWith('embedded.mobileprovision'));
+
+  if (entry === undefined) {
+    throw new LipaError({
+      code: 'ipa_invalid',
+      message: `${ipa} has no embedded.mobileprovision`,
+    });
+  }
+
+  return profileInfo(readZipEntry(buffer, entry, ipa), 'embedded.mobileprovision');
 }
 
 export function inspectIpa(ipa: string): Inspection {
@@ -122,10 +137,13 @@ export function inspectIpa(ipa: string): Inspection {
     const expected = `${profile.team}.${profile.bundleId}`;
     const actual = typeof info.CFBundleIdentifier === 'string' ? info.CFBundleIdentifier : '';
 
+    const devices =
+      profile.devices.length === 0 ? 'no devices' : `${profile.devices.length} devices`;
+
     checks.push({
       name: 'profile',
       ok: profile.bundleId === actual && profile.expires.getTime() > Date.now(),
-      detail: `${expected}, expires ${profile.expires.toISOString().slice(0, 10)}`,
+      detail: `${expected}, ${profile.kind}, ${devices}, expires ${profile.expires.toISOString().slice(0, 10)}`,
     });
   }
 

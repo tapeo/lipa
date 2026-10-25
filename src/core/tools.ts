@@ -48,6 +48,19 @@ export const RCODESIGN: PinnedTool = {
   extractedTree: 'apple-codesign-0.29.0-x86_64-unknown-linux-musl',
 };
 
+export const UV: PinnedTool = {
+  name: 'uv',
+  version: '0.13.5',
+  url: 'https://github.com/astral-sh/uv/releases/download/0.13.5/uv-x86_64-unknown-linux-gnu.tar.gz',
+  sha256: 'f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f',
+  archive: 'tar.gz',
+  hashOf: 'archive',
+  binary: 'uv-x86_64-unknown-linux-gnu/uv',
+  extractedTree: 'uv-x86_64-unknown-linux-gnu',
+};
+
+export const DEVICE_TOOLS = [UV];
+
 export const TOOLS = [SWIFT, XTOOL, RCODESIGN];
 
 export function swiftToolchain(): string {

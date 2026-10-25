@@ -60,11 +60,16 @@ lipa build --build 42 --out build/App.ipa
 
 # before uploading
 lipa inspect build/App.ipa
+
+# try it on a device, over USB or a VPN address such as a tailnet name
+lipa run --device iphone
 ```
 
 `lipa build` reads `project.yml` from an XcodeGen project: target, bundle id, team, deployment target, sources, resources, packages, Info.plist and entitlements. It writes nothing into the project except `build/`.
 
 `lipa doctor` says which step is missing and which command to run.
+
+`lipa run` installs its device helper on the first use, about 300 MB under `~/.lipa/tools/device`, or ahead of time with `lipa setup --only device`. It also needs a RemotePairing record for the device: `docs/cli.md` has the one command that makes it. `prepare` and `build` never install it.
 
 ## Connect to the Mac
 
@@ -113,7 +118,7 @@ Everything lipa owns is under `~/.lipa`: `tools/`, `signing/`, `cache/`, `work/`
 
 | Command | What it does |
 |---|---|
-| `lipa setup` | Installs Swift, xtool and rcodesign at pinned versions, sha256 checked |
+| `lipa setup` | Installs Swift, xtool and rcodesign at pinned versions, sha256 checked. `--only device` adds the device helper |
 | `lipa sdk --xcode <path>` | Builds and installs the Darwin SDK from Xcode.app or Xcode.xip |
 | `lipa sdk --mac <host>` | Copies Xcode.app from a Mac, installs the SDK, deletes the copy |
 | `lipa signing import` | Stores the certificate, the key and the profile for a bundle id |
@@ -121,10 +126,11 @@ Everything lipa owns is under `~/.lipa`: `tools/`, `signing/`, `cache/`, `work/`
 | `lipa build` | Prepare, assemble, patch, strip, sign, zip, inspect |
 | `lipa inspect <ipa>` | Executable mode, plist keys, SDK, signature, profile |
 | `lipa doctor` | Tools, SDK, workspace, cache, signing and the Mac in one report |
+| `lipa run` | Build for development, install on a device, launch and follow its logs |
 
 `prepare` and `build` take `--mac <host>`, `--via <command>`, `--update` for the dependencies and `--clean` for a full recompile. `prepare` also takes `--import <dir>` for an `actool` output produced elsewhere.
 
-Every command answers JSON without a terminal or with `--json`, and exit codes are stable: `2` usage, `3` missing tool or Xcode, `4` stale prebuilt cache, `5` SDK mismatch, `6` signing, `7` bad IPA, `8` Mac unreachable.
+Every command answers JSON without a terminal or with `--json`, and exit codes are stable: `2` usage, `3` missing tool or Xcode, `4` stale prebuilt cache, `5` SDK mismatch, `6` signing, `7` bad IPA, `8` Mac unreachable, `9` device unreachable.
 
 ## Limits
 
