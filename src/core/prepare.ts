@@ -165,7 +165,7 @@ export function packageManifest(spec: BuildSpec): string {
     '',
     'let package = Package(',
     `    name: "${spec.target}App",`,
-    `    platforms: [.iOS(.v${spec.minimumIOS.split('.')[0]})],`,
+    `    platforms: [.iOS("${spec.minimumIOS}")],`,
     '    products: [',
     `        .library(name: "${spec.target}", targets: ["${spec.target}"])`,
     '    ],',

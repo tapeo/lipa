@@ -50,7 +50,7 @@ describe('writePackage', () => {
 
     expect(readlinkSync(join(directory, 'Sources', 'Sample'))).toBe(source);
     expect(readFileSync(join(directory, 'xtool.yml'), 'utf8')).toContain('skipLSP: true');
-    expect(readFileSync(join(directory, 'Package.swift'), 'utf8')).toContain('.v18');
+    expect(readFileSync(join(directory, 'Package.swift'), 'utf8')).toContain('.iOS("18.0")');
   });
 
   test('leaves the files alone when nothing changed, so xtool keeps its build', async () => {
