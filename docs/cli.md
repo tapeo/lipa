@@ -65,7 +65,9 @@ Installs Swift 6.4.1 for Ubuntu 24.04, xtool 1.23.0 and rcodesign 0.29.0 under `
 | `lipa sdk --xcode <path>` | `--xcode`, Xcode.app or Xcode.xip on this machine |
 | `lipa sdk --mac <host>` | `--mac`, `--via`, `--xcode` for a path on the Mac, `--keep` |
 
-The first form runs `xtool sdk install`, which writes to `~/.swiftpm/swift-sdks/darwin.artifactbundle`. The second copies `Xcode.app` from the Mac with the generic transport and installs the same way, then deletes the copy unless `--keep` is given. `--xcode` with `--mac` names the Xcode on the Mac, `/Applications/Xcode.app` by default. Both put the pinned Swift toolchain on the `PATH` of `xtool`, so the shell `PATH` does not matter. When the install fails, the copy of Xcode is kept and its directory printed.
+The first form runs `xtool sdk install`, which writes to `~/.swiftpm/swift-sdks/darwin.artifactbundle`. The second copies from the Mac, with the generic transport, only the parts of `Xcode.app` that `xtool` 1.23.0 reads: the iPhoneOS, iPhoneSimulator and MacOSX platforms and the Swift and clang libraries of the toolchain, without the prebuilt modules. The Mac compresses them with `tar -z`, about 350 MB for Xcode 27.1 against 9.6 GB for the whole app, and the bytes received show on stderr while it runs. It then installs the same way and deletes the copy unless `--keep` is given; with `--keep` the directory is printed. Ctrl-C deletes the copy too. `--xcode` with `--mac` names the Xcode on the Mac, `/Applications/Xcode.app` by default. Both put the pinned Swift toolchain on the `PATH` of `xtool`, so the shell `PATH` does not matter.
+
+The list of copied paths mirrors `SDKEntry.wanted` in the `SDKBuilder.swift` of the pinned `xtool`. A new pin of `xtool` needs that list checked again; a test fails until it is.
 
 ## signing
 

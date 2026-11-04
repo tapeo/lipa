@@ -53,7 +53,7 @@ function diagnose(source: RemoteSource): string {
   return `${source.command} sh -c true`;
 }
 
-function quote(value: string): string {
+export function quote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
@@ -137,7 +137,7 @@ export interface RemoteRun {
   output: string;
 }
 
-async function remote(source: RemoteSource, options: RemoteRun): Promise<void> {
+export async function remote(source: RemoteSource, options: RemoteRun): Promise<void> {
   const child = Bun.spawn({
     cmd: transportArgv(source, options.command),
     stdin: options.stdin === undefined ? 'ignore' : Bun.file(options.stdin),
@@ -304,17 +304,4 @@ export async function fetchPrebuilt(
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
-}
-
-export async function pullXcode(
-  source: RemoteSource,
-  remoteXcode: string,
-  destination: string,
-): Promise<void> {
-  requireCommand('tar');
-  const parent = join(remoteXcode, '..');
-  const name = remoteXcode.split('/').filter(Boolean).at(-1) ?? 'Xcode.app';
-  const script = ['set -eu', `tar -cf - -C ${quote(parent)} ${quote(name)}`].join('\n');
-
-  await remote(source, { command: script, stdin: undefined, output: destination });
 }

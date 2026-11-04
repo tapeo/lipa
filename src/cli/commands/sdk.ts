@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,9 +7,10 @@ import { stringValue } from '@/cli/parser.ts';
 import { LipaError } from '@/core/errors.ts';
 import { requireCommand, run } from '@/core/exec.ts';
 import { paths } from '@/core/paths.ts';
-import { pullXcode, type RemoteSource, remoteSource } from '@/core/remote.ts';
+import { type RemoteSource, remoteName, remoteSource } from '@/core/remote.ts';
 import { readSdk } from '@/core/sdk.ts';
 import { swiftToolchain, toolEnvironment } from '@/core/tools.ts';
+import { pullXcode } from '@/core/xcode-copy.ts';
 
 function xtoolPath(): string {
   return Bun.which('xtool') ?? join(paths().bin, 'xtool');
@@ -47,29 +48,78 @@ async function install(path: string): Promise<{ version: string; path: string }>
   return { version: sdk.version, path: sdk.root };
 }
 
+function sizeInMegabytes(path: string): number {
+  if (!existsSync(path)) {
+    return 0;
+  }
+
+  return Math.round(statSync(path).size / 1_000_000);
+}
+
+function reportDownload(archive: string, name: string): () => void {
+  if (!process.stderr.isTTY) {
+    return () => {};
+  }
+
+  const started = Date.now();
+  const timer = setInterval(() => {
+    const seconds = Math.round((Date.now() - started) / 1000);
+    process.stderr.write(
+      `\rCopying the SDK from ${name}: ${sizeInMegabytes(archive)} MB, ${seconds} s`,
+    );
+  }, 1000);
+
+  return () => {
+    clearInterval(timer);
+    process.stderr.write(`\rCopied the SDK from ${name}: ${sizeInMegabytes(archive)} MB\n`);
+  };
+}
+
+async function download(source: RemoteSource, remoteXcode: string, work: string): Promise<string> {
+  requireCommand('tar');
+  const archive = join(work, 'Xcode.tar.gz');
+  const stopReport = reportDownload(archive, remoteName(source));
+
+  try {
+    await pullXcode(source, remoteXcode, archive);
+  } finally {
+    stopReport();
+  }
+
+  const app = join(work, 'Xcode.app');
+  mkdirSync(app);
+  const extracted = await run(['tar', '-xzf', archive, '-C', app]);
+
+  if (extracted.exitCode !== 0) {
+    throw new LipaError({
+      code: 'generic',
+      message: `Cannot extract Xcode: ${extracted.stderr}`,
+    });
+  }
+
+  rmSync(archive);
+
+  return app;
+}
+
 async function installFromMac(
   source: RemoteSource,
   remoteXcode: string,
   keep: boolean,
 ): Promise<{ version: string; path: string }> {
   const work = join(tmpdir(), `lipa-xcode-${Date.now()}`);
-  const archive = join(work, 'Xcode.tar');
+  const onInterrupt = (): void => {
+    rmSync(work, { recursive: true, force: true });
+    process.exit(130);
+  };
   mkdirSync(work, { recursive: true });
+  process.once('SIGINT', onInterrupt);
 
   try {
-    await pullXcode(source, remoteXcode, archive);
-
-    const extracted = await run(['tar', '-xf', archive, '-C', work]);
-
-    if (extracted.exitCode !== 0) {
-      throw new LipaError({
-        code: 'generic',
-        message: `Cannot extract Xcode: ${extracted.stderr}`,
-      });
-    }
-
-    return await install(join(work, 'Xcode.app'));
+    return await install(await download(source, remoteXcode, work));
   } finally {
+    process.off('SIGINT', onInterrupt);
+
     if (keep) {
       process.stderr.write(`Xcode kept in ${work}\n`);
     } else {
@@ -88,7 +138,11 @@ export const sdkCommand: CommandSpec = {
       value: 'path',
       description: 'Xcode.app or Xcode.xip, on this machine or on the Mac with --mac',
     },
-    { name: 'mac', value: 'host', description: 'Mac reachable with ssh, to copy Xcode from' },
+    {
+      name: 'mac',
+      value: 'host',
+      description: 'Mac reachable with ssh, to copy the SDK parts of Xcode from',
+    },
     { name: 'via', value: 'command', description: 'Command that runs sh on the Mac' },
     { name: 'keep', description: 'Keep the copy of Xcode.app taken from the Mac' },
   ],

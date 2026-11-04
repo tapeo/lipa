@@ -120,7 +120,7 @@ Everything lipa owns is under `~/.lipa`: `tools/`, `signing/`, `cache/`, `work/`
 |---|---|
 | `lipa setup` | Installs Swift, xtool and rcodesign at pinned versions, sha256 checked. `--only device` adds the device helper |
 | `lipa sdk --xcode <path>` | Builds and installs the Darwin SDK from Xcode.app or Xcode.xip |
-| `lipa sdk --mac <host>` | Copies Xcode.app from a Mac, installs the SDK, deletes the copy |
+| `lipa sdk --mac <host>` | Copies the SDK parts of Xcode.app from a Mac, installs the SDK, deletes the copy |
 | `lipa signing import` | Stores the certificate, the key and the profile for a bundle id |
 | `lipa prepare` | Compiles the app and refreshes the prebuilt cache, without signing |
 | `lipa build` | Prepare, assemble, patch, strip, sign, zip, inspect |

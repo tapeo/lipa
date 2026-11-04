@@ -1,6 +1,6 @@
 # The Mac side
 
-lipa needs the Mac for `actool` and for nothing else. It never installs anything there, writes nothing there and copies nothing back except the compiled asset catalog, or Xcode itself when `lipa sdk --mac` asks for it.
+lipa needs the Mac for `actool` and for nothing else. It never installs anything there, writes nothing there and copies nothing back except the compiled asset catalog, or the SDK parts of Xcode when `lipa sdk --mac` asks for them.
 
 The pinned tools target Xcode 27 and the iOS 27 SDK. The commands below are the ones `lipa doctor --mac <host>` checks.
 
