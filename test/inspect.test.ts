@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { inspectIpa, ipaProfile } from '@/core/inspect.ts';
+import { inspectIpa, ipaProfile, ipaProfiles } from '@/core/inspect.ts';
 import { serializePlist } from '@/core/plist.ts';
 import { MAC_KEYS } from '@/core/prebuilt.ts';
 
@@ -87,6 +87,78 @@ describe('inspectIpa', () => {
       'sdk 27.0',
     );
     expect(result.ok).toBe(true);
+  });
+});
+
+function rezip(name: string): string {
+  const ipa = join(work, `${name}.ipa`);
+  rmSync(ipa, { force: true });
+  Bun.spawnSync(['zip', '-qry', ipa, 'Payload'], { cwd: work });
+
+  return ipa;
+}
+
+function addExtension(version: string, contents = profile()): void {
+  const appex = join(app, 'PlugIns', 'Share.appex');
+  mkdirSync(join(appex, '_CodeSignature'), { recursive: true });
+  writeFileSync(
+    join(appex, 'Info.plist'),
+    serializePlist({
+      CFBundleIdentifier: 'com.example.sample.share',
+      CFBundleExecutable: 'Share',
+      CFBundleVersion: version,
+    }),
+  );
+  writeFileSync(join(appex, 'Share'), macho());
+  chmodSync(join(appex, 'Share'), 0o755);
+  writeFileSync(join(appex, '_CodeSignature', 'CodeResources'), 'plist');
+  writeFileSync(
+    join(appex, 'embedded.mobileprovision'),
+    contents.replace('com.example.sample<', 'com.example.sample.share<'),
+  );
+}
+
+describe('inspectIpa on extensions and string catalogs', () => {
+  test('passes an extension signed with its own profile and the app version', () => {
+    makeIpa(0o755);
+    addExtension('1');
+    const result = inspectIpa(rezip('extension-ok'));
+    const check = result.checks.find((item) => item.name === 'extension Share.appex');
+
+    expect(check?.ok).toBe(true);
+    expect(result.ok).toBe(true);
+  });
+
+  test('catches an extension whose build number differs from the app', () => {
+    makeIpa(0o755);
+    addExtension('2');
+    const check = inspectIpa(rezip('extension-version')).checks.find(
+      (item) => item.name === 'extension Share.appex',
+    );
+
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('version 2');
+  });
+
+  test('reads the profile of the app, not the one of an extension', () => {
+    makeIpa(0o755);
+    addExtension('1');
+    const ipa = rezip('extension-profile');
+
+    expect(ipaProfile(ipa).bundleId).toBe('com.example.sample');
+    expect(ipaProfiles(ipa).map((item) => item.bundleId)).toEqual([
+      'com.example.sample',
+      'com.example.sample.share',
+    ]);
+  });
+
+  test('fails when a string catalog is left in the bundle', () => {
+    makeIpa(0o755);
+    writeFileSync(join(app, 'Localizable.xcstrings'), '{}');
+    const result = inspectIpa(rezip('catalog'));
+
+    expect(result.checks.find((item) => item.name === 'string_catalogs')?.ok).toBe(false);
+    expect(result.ok).toBe(false);
   });
 });
 

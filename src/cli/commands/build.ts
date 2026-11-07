@@ -2,14 +2,14 @@ import type { CommandSpec } from '@/cli/command.ts';
 import { renderTable } from '@/cli/output.ts';
 import { booleanValue, stringValue } from '@/cli/parser.ts';
 import { buildIos } from '@/core/build.ts';
-import { macSource } from '@/core/prepare.ts';
+import { buildConfiguration, macSource } from '@/core/prepare.ts';
 import { signingKind } from '@/core/signing.ts';
 
 export const buildCommand: CommandSpec = {
   name: 'build',
   summary: 'Build, sign and package an iOS app on Linux',
   usage:
-    'lipa build [<dir>] [--mac <host> | --via <command>] [--signing app-store|development] [--build <number>] [--version <version>] [--out <ipa>] [--target <name>] [--update] [--clean]',
+    'lipa build [<dir>] [--mac <host> | --via <command>] [--signing app-store|development] [--configuration release|debug] [--build <number>] [--version <version>] [--out <ipa>] [--target <name>] [--update] [--clean]',
   arguments: 1,
   flags: [
     {
@@ -36,6 +36,11 @@ export const buildCommand: CommandSpec = {
       description: 'Signing identity: app-store or development, default app-store',
     },
     {
+      name: 'configuration',
+      value: 'name',
+      description: 'release or debug, default release; debug needs --signing development',
+    },
+    {
       name: 'update',
       description: 'Resolve the package dependencies again without compiling everything',
     },
@@ -54,6 +59,7 @@ export const buildCommand: CommandSpec = {
     const root = args.positionals[0] ?? process.cwd();
     const result = await buildIos({
       signing: signingKind(stringValue(args.values, 'signing')),
+      configuration: buildConfiguration(stringValue(args.values, 'configuration'), 'release'),
       root,
       build: stringValue(args.values, 'build'),
       version: stringValue(args.values, 'version'),
@@ -74,6 +80,8 @@ export const buildCommand: CommandSpec = {
       { name: 'Version', value: `${result.version} (${result.build})` },
       { name: 'Bundle id', value: result.bundleId },
       { name: 'Signing', value: result.signing },
+      { name: 'Configuration', value: result.configuration },
+      { name: 'Extensions', value: result.extensions.join(', ') || 'none' },
       { name: 'SDK', value: `iOS ${result.sdk}` },
       { name: 'Symbols', value: result.symbols },
     ];

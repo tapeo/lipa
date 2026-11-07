@@ -1,17 +1,23 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { LipaError } from '@/core/errors.ts';
+import { type ExtensionSpec, readExtensions } from '@/core/extensions.ts';
 import { type PlistValue, readPlist } from '@/core/plist.ts';
+import {
+  bundleIdOf,
+  invalid,
+  type PackageDependency,
+  parsePackages,
+  parseSources,
+  readConfigValue,
+  record,
+  targetSettings,
+  text,
+  type Yaml,
+} from '@/core/project-yml.ts';
 
-export interface PackageDependency {
-  name: string;
-  product: string;
-  url: string | undefined;
-  path: string | undefined;
-  kind: 'path' | 'from' | 'exact' | 'branch' | 'revision';
-  requirement: string | undefined;
-}
+export type { PackageDependency } from '@/core/project-yml.ts';
 
 export interface BuildSpec {
   root: string;
@@ -33,73 +39,13 @@ export interface BuildSpec {
   accentColor: string | undefined;
   deviceFamilies: string[];
   settings: Record<string, string>;
+  extensions: ExtensionSpec[];
 }
 
-type Yaml = { [key: string]: unknown };
-
-function invalid(root: string, message: string, fix?: string): LipaError {
-  return new LipaError({
-    code: 'config_invalid',
-    message: `${join(root, 'project.yml')}: ${message}`,
-    fix,
-  });
-}
-
-function record(value: unknown): Yaml | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return undefined;
-  }
-
-  return value as Yaml;
-}
-
-function text(value: unknown): string | undefined {
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  if (typeof value === 'number') {
-    return String(value);
-  }
-
-  return undefined;
-}
-
-function stringMap(value: unknown): Record<string, string> {
-  const source = record(value);
-  const settings: Record<string, string> = {};
-
-  for (const [key, item] of Object.entries(source ?? {})) {
-    const scalar = text(item);
-
-    if (scalar !== undefined) {
-      settings[key] = scalar;
-    }
-  }
-
-  return settings;
-}
-
-function readConfigValue(
-  root: string,
-  configPath: string | undefined,
-  key: string,
-): string | undefined {
-  if (configPath === undefined) {
-    return undefined;
-  }
-
-  const path = isAbsolute(configPath) ? configPath : join(root, configPath);
-
-  if (!existsSync(path)) {
-    return undefined;
-  }
-
-  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*([^\\s;]+)\\s*;?\\s*$`, 'm');
-  const match = readFileSync(path, 'utf8').match(pattern);
-
-  return match?.[1];
-}
+export type PlistTarget = Pick<
+  BuildSpec,
+  'target' | 'name' | 'bundleId' | 'infoPlist' | 'settings'
+>;
 
 function isIosApplication(target: Yaml): boolean {
   if (target.type !== 'application') {
@@ -144,92 +90,7 @@ function targetName(project: Yaml, wanted: Yaml): string {
   throw new LipaError({ code: 'config_invalid', message: 'Target not found in project.yml' });
 }
 
-function parsePackages(root: string, project: Yaml, target: Yaml): PackageDependency[] {
-  const packages = record(project.packages) ?? {};
-  const targetDependencies = Array.isArray(target.dependencies) ? target.dependencies : [];
-  const dependencies: PackageDependency[] = [];
-
-  for (const value of targetDependencies) {
-    const dependency = record(value);
-    const name = text(dependency?.package);
-
-    if (dependency === undefined || name === undefined) {
-      continue;
-    }
-
-    const entry = record(packages[name]);
-
-    if (entry === undefined) {
-      throw invalid(root, `dependency on ${name}, which is not in packages`);
-    }
-
-    const path = text(entry.path);
-    const url = text(entry.url);
-    const exact = text(entry.exactVersion);
-    const from = text(entry.from);
-    const branch = text(entry.branch);
-    const revision = text(entry.revision);
-    const requirement = exact ?? from ?? branch ?? revision;
-
-    dependencies.push({
-      name,
-      product: text(dependency.product) ?? name,
-      url,
-      path: path === undefined ? undefined : resolve(root, path),
-      kind:
-        path !== undefined
-          ? 'path'
-          : exact !== undefined
-            ? 'exact'
-            : from !== undefined
-              ? 'from'
-              : branch !== undefined
-                ? 'branch'
-                : 'revision',
-      requirement,
-    });
-  }
-
-  return dependencies;
-}
-
-interface SourceEntry {
-  path: string;
-  buildPhase: string | undefined;
-}
-
-function parseSources(root: string, target: Yaml): SourceEntry[] {
-  const value = target.sources;
-
-  if (!Array.isArray(value)) {
-    return [{ path: root, buildPhase: undefined }];
-  }
-
-  return value.map((item) => {
-    if (typeof item === 'string') {
-      return { path: resolve(root, item), buildPhase: undefined };
-    }
-
-    const entry = record(item) ?? {};
-    const path = text(entry.path);
-
-    if (path === undefined) {
-      throw invalid(root, 'a sources entry has no path');
-    }
-
-    return { path: resolve(root, path), buildPhase: text(entry.buildPhase) };
-  });
-}
-
-function isAssetCatalog(path: string): boolean {
-  return path.endsWith('.xcassets');
-}
-
-export interface ReadSpecOptions {
-  target?: string | undefined;
-}
-
-export function readSpec(root: string, options: ReadSpecOptions = {}): BuildSpec {
+function readProject(root: string): Yaml {
   const path = join(root, 'project.yml');
 
   if (!existsSync(path)) {
@@ -246,46 +107,62 @@ export function readSpec(root: string, options: ReadSpecOptions = {}): BuildSpec
     throw invalid(root, 'the file is not a mapping');
   }
 
-  const projectSettings = stringMap(record(project.settings)?.base);
-  const applications = findTargets(root, project);
-  const wanted = options.target;
+  return project;
+}
 
-  const target =
-    wanted === undefined
-      ? applications[0]
-      : applications.find((item) => targetName(project, item) === wanted);
+function selectTarget(root: string, project: Yaml, wanted: string | undefined): Yaml {
+  const applications = findTargets(root, project);
+  let target = applications[0];
+
+  if (wanted !== undefined) {
+    target = applications.find((item) => targetName(project, item) === wanted);
+  }
 
   if (target === undefined) {
     throw invalid(root, `no iOS application target named ${wanted}`);
   }
 
-  const name = targetName(project, target);
-  const settings = { ...projectSettings, ...stringMap(record(target.settings)?.base) };
-  const bundleId =
-    settings.PRODUCT_BUNDLE_IDENTIFIER ??
-    (() => {
-      const prefix = text(record(project.options)?.bundleIdPrefix);
+  return target;
+}
 
-      return prefix === undefined ? undefined : `${prefix}.${name}`;
-    })();
+function requiredSetting(
+  root: string,
+  name: string,
+  settings: Record<string, string>,
+  key: string,
+): string {
+  const value = settings[key];
+
+  if (value === undefined) {
+    throw invalid(root, `target ${name} has no ${key}`);
+  }
+
+  return value;
+}
+
+export interface ReadSpecOptions {
+  target?: string | undefined;
+}
+
+export function readSpec(root: string, options: ReadSpecOptions = {}): BuildSpec {
+  const project = readProject(root);
+  const target = selectTarget(root, project, options.target);
+  const name = targetName(project, target);
+  const settings = targetSettings(project, target);
+  const bundleId = bundleIdOf(project, name, settings);
 
   if (bundleId === undefined) {
     throw invalid(root, `target ${name} has no PRODUCT_BUNDLE_IDENTIFIER`);
   }
 
-  if (settings.DEVELOPMENT_TEAM === undefined) {
-    throw invalid(root, `target ${name} has no DEVELOPMENT_TEAM`);
-  }
-
-  const deployment = record(record(project.options)?.deploymentTarget)?.iOS;
-  const minimumIOS = text(deployment);
+  const team = requiredSetting(root, name, settings, 'DEVELOPMENT_TEAM');
+  const minimumIOS = text(record(record(project.options)?.deploymentTarget)?.iOS);
 
   if (minimumIOS === undefined) {
     throw invalid(root, 'missing options.deploymentTarget.iOS');
   }
 
-  const configFiles = record(target.configFiles) ?? {};
-  const releaseConfig = text(configFiles.Release);
+  const releaseConfig = text(record(target.configFiles)?.Release);
   const marketingVersion = readConfigValue(root, releaseConfig, 'MARKETING_VERSION');
 
   if (marketingVersion === undefined) {
@@ -296,53 +173,33 @@ export function readSpec(root: string, options: ReadSpecOptions = {}): BuildSpec
     );
   }
 
-  const currentProjectVersion =
-    settings.CURRENT_PROJECT_VERSION ??
-    readConfigValue(root, releaseConfig, 'CURRENT_PROJECT_VERSION');
-
-  const infoPlistPath = settings.INFOPLIST_FILE;
-
-  if (infoPlistPath === undefined) {
-    throw invalid(root, `target ${name} has no INFOPLIST_FILE`);
-  }
-
-  const entitlementsPath = settings.CODE_SIGN_ENTITLEMENTS;
-
-  if (entitlementsPath === undefined) {
-    throw invalid(root, `target ${name} has no CODE_SIGN_ENTITLEMENTS`);
-  }
-
-  const sourceEntries = parseSources(root, target);
-  const assets = sourceEntries.find((entry) => isAssetCatalog(entry.path))?.path;
-  const resources = sourceEntries
-    .filter((entry) => entry.buildPhase === 'resources' && !isAssetCatalog(entry.path))
-    .map((entry) => entry.path);
-  const sources = sourceEntries
-    .filter((entry) => entry.buildPhase === undefined && !isAssetCatalog(entry.path))
-    .map((entry) => entry.path);
-
-  const infoPlist = resolve(root, infoPlistPath);
+  const infoPlist = requiredSetting(root, name, settings, 'INFOPLIST_FILE');
+  const entitlements = requiredSetting(root, name, settings, 'CODE_SIGN_ENTITLEMENTS');
+  const files = parseSources(root, target);
 
   return {
     root,
     target: name,
     name: settings.PRODUCT_NAME ?? name,
     bundleId,
-    team: settings.DEVELOPMENT_TEAM,
+    team,
     minimumIOS,
     marketingVersion,
-    currentProjectVersion,
+    currentProjectVersion:
+      settings.CURRENT_PROJECT_VERSION ??
+      readConfigValue(root, releaseConfig, 'CURRENT_PROJECT_VERSION'),
     swiftVersion: settings.SWIFT_VERSION ?? '5.0',
-    infoPlist,
-    entitlements: resolve(root, entitlementsPath),
-    assets,
-    resources,
-    sources,
+    infoPlist: resolve(root, infoPlist),
+    entitlements: resolve(root, entitlements),
+    assets: files.assets,
+    resources: files.resources,
+    sources: files.sources,
     packages: parsePackages(root, project, target),
     appIcon: settings.ASSETCATALOG_COMPILER_APPICON_NAME,
     accentColor: settings.ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME,
     deviceFamilies: (settings.TARGETED_DEVICE_FAMILY ?? '1').split(',').map((item) => item.trim()),
     settings,
+    extensions: readExtensions(root, project, target, bundleId),
   };
 }
 
@@ -350,53 +207,56 @@ export interface ExpandedPlist {
   [key: string]: PlistValue;
 }
 
+function expandValue(value: PlistValue, replace: (text: string) => string): PlistValue {
+  if (typeof value === 'string') {
+    return replace(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => expandValue(item, replace));
+  }
+
+  if (value === null || typeof value !== 'object' || value instanceof Date) {
+    return value;
+  }
+
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, expandValue(item as PlistValue, replace)]),
+  );
+}
+
 export function expandPlist(
-  spec: BuildSpec,
+  spec: PlistTarget,
   values: { version: string; build: string },
 ): ExpandedPlist {
-  const base = readPlist(spec.infoPlist);
   const settings: Record<string, string> = {
     ...spec.settings,
-    EXECUTABLE_NAME: spec.name,
+    EXECUTABLE_NAME: spec.target,
     PRODUCT_NAME: spec.name,
+    PRODUCT_MODULE_NAME: spec.target,
     PRODUCT_BUNDLE_IDENTIFIER: spec.bundleId,
     MARKETING_VERSION: values.version,
     CURRENT_PROJECT_VERSION: values.build,
   };
 
-  const expand = (value: PlistValue): PlistValue => {
-    if (typeof value === 'string') {
-      return value.replace(/\$\(([A-Za-z0-9_]+)\)/g, (_match, key: string) => {
-        const replacement = settings[key];
+  const replace = (text: string): string =>
+    text.replace(/\$\(([A-Za-z0-9_]+)\)/g, (_match, key: string) => {
+      const replacement = settings[key];
 
-        if (replacement === undefined) {
-          throw new LipaError({
-            code: 'config_invalid',
-            message: `${spec.infoPlist} uses $(${key}), which lipa does not set`,
-            fix: 'Add the setting to project.yml, or replace the placeholder with a literal value.',
-          });
-        }
-
-        return replacement;
-      });
-    }
-
-    if (Array.isArray(value)) {
-      return value.map(expand);
-    }
-
-    if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
-      if (value instanceof Uint8Array) {
-        return value;
+      if (replacement === undefined) {
+        throw new LipaError({
+          code: 'config_invalid',
+          message: `${spec.infoPlist} uses $(${key}), which lipa does not set`,
+          fix: 'Add the setting to project.yml, or replace the placeholder with a literal value.',
+        });
       }
 
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, expand(item as PlistValue)]),
-      );
-    }
+      return replacement;
+    });
 
-    return value;
-  };
-
-  return expand(base) as ExpandedPlist;
+  return expandValue(readPlist(spec.infoPlist), replace) as ExpandedPlist;
 }

@@ -5,9 +5,9 @@ import { booleanValue, stringValue } from '@/cli/parser.ts';
 import { buildIos } from '@/core/build.ts';
 import { runOnDevice } from '@/core/device.ts';
 import { LipaError } from '@/core/errors.ts';
-import { ipaProfile } from '@/core/inspect.ts';
-import { macSource } from '@/core/prepare.ts';
-import { profileInfo, profilePath, signingStatus } from '@/core/signing.ts';
+import { ipaProfiles } from '@/core/inspect.ts';
+import { buildConfiguration, macSource } from '@/core/prepare.ts';
+import { type ProfileInfo, profileInfo, profilePath, signingStatus } from '@/core/signing.ts';
 import { type BuildSpec, readSpec } from '@/core/spec.ts';
 
 function deviceInProfile(spec: BuildSpec, udid: string | undefined): string {
@@ -41,11 +41,37 @@ function deviceInProfile(spec: BuildSpec, udid: string | undefined): string {
   return udid;
 }
 
+function checkDeviceProfile(installed: ProfileInfo, ipa: string, udid: string): void {
+  if (installed.kind !== 'development') {
+    throw new LipaError({
+      code: 'signing_invalid',
+      message: `${ipa} carries a ${installed.kind} profile for ${installed.bundleId}, the device needs a development one`,
+      fix: 'Run lipa build --signing development, or pass that IPA to --ipa.',
+    });
+  }
+
+  if (installed.devices.includes(udid)) {
+    return;
+  }
+
+  let listed = 'no device';
+
+  if (installed.devices.length > 0) {
+    listed = installed.devices.join(', ');
+  }
+
+  throw new LipaError({
+    code: 'signing_invalid',
+    message: `The profile of ${installed.bundleId} in ${ipa} lists ${listed}, not ${udid}`,
+    fix: 'Import a development profile that lists this device and build again.',
+  });
+}
+
 export const runCommand: CommandSpec = {
   name: 'run',
   summary: 'Build for development, install, launch and follow the logs',
   usage:
-    'lipa run [<dir>] --device <host> [--port <n>] [--udid <udid>] [--ipa <path>] [--logs app|all|none] [--mac <host> | --via <command>] [--update] [--clean]',
+    'lipa run [<dir>] --device <host> [--port <n>] [--udid <udid>] [--ipa <path>] [--logs app|all|none] [--configuration debug|release] [--mac <host> | --via <command>] [--update] [--clean]',
   arguments: 1,
   flags: [
     {
@@ -65,6 +91,11 @@ export const runCommand: CommandSpec = {
       value: 'scope',
       description:
         'app for the bundle id only, all for every process, none to stop after the launch',
+    },
+    {
+      name: 'configuration',
+      value: 'name',
+      description: 'debug or release, default debug',
     },
     {
       name: 'mac',
@@ -108,6 +139,7 @@ export const runCommand: CommandSpec = {
       const built = await buildIos({
         root,
         signing: 'development',
+        configuration: buildConfiguration(stringValue(args.values, 'configuration'), 'debug'),
         clean: booleanValue(args.values, 'clean'),
         update: booleanValue(args.values, 'update'),
         mac: macSource({
@@ -131,22 +163,8 @@ export const runCommand: CommandSpec = {
       });
     }
 
-    const installed = ipaProfile(ipa);
-
-    if (installed.kind !== 'development') {
-      throw new LipaError({
-        code: 'signing_invalid',
-        message: `${ipa} carries a ${installed.kind} profile, the device needs a development one`,
-        fix: 'Run lipa build --signing development, or pass that IPA to --ipa.',
-      });
-    }
-
-    if (!installed.devices.includes(udid)) {
-      throw new LipaError({
-        code: 'signing_invalid',
-        message: `${ipa} was signed for ${installed.devices.join(', ') || 'no device'}, not ${udid}`,
-        fix: 'Import a development profile that lists this device and build again.',
-      });
+    for (const installed of ipaProfiles(ipa)) {
+      checkDeviceProfile(installed, ipa, udid);
     }
 
     const code = await runOnDevice({

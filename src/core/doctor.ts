@@ -11,8 +11,8 @@ import { checkPrebuilt } from '@/core/prebuilt.ts';
 import { packageDirectory, workspaceWarm } from '@/core/prepare.ts';
 import { remoteSource } from '@/core/remote.ts';
 import { readSdk } from '@/core/sdk.ts';
-import { signingPaths, signingStatus } from '@/core/signing.ts';
-import { readSpec } from '@/core/spec.ts';
+import { type SigningKind, signingPaths, signingStatus } from '@/core/signing.ts';
+import { type BuildSpec, readSpec } from '@/core/spec.ts';
 import { swiftToolchain } from '@/core/tools.ts';
 
 export type DoctorCheck = Check;
@@ -112,6 +112,40 @@ async function projectChecks(root: string, sdkVersion: string): Promise<DoctorCh
       skipped: true,
       detail: 'no development identity, run lipa signing import with a development profile',
     });
+  }
+
+  checks.push(...(await extensionSigningChecks(spec, existsSync(development.cert))));
+
+  return checks;
+}
+
+async function extensionSigningChecks(
+  spec: BuildSpec,
+  hasDevelopment: boolean,
+): Promise<DoctorCheck[]> {
+  const kinds: SigningKind[] = ['app-store'];
+  const checks: DoctorCheck[] = [];
+
+  if (hasDevelopment) {
+    kinds.push('development');
+  }
+
+  for (const extension of spec.extensions) {
+    for (const kind of kinds) {
+      const status = await signingStatus(spec.team, extension.bundleId, kind);
+      let detail = status.reason ?? '';
+
+      if (status.ok) {
+        detail = `${kind}, expires ${status.expires?.slice(0, 10)}`;
+      }
+
+      checks.push({
+        name: `signing ${extension.target} ${kind}`,
+        ok: status.ok,
+        detail,
+        fix: status.fix,
+      });
+    }
   }
 
   return checks;

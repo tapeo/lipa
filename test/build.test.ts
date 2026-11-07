@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ipaOutput } from '@/core/build.ts';
-import { writePackage } from '@/core/prepare.ts';
+import { writePackage } from '@/core/package.ts';
 import { readSpec } from '@/core/spec.ts';
 
 const fixtures = join(import.meta.dir, '..', 'fixtures');
@@ -46,7 +46,7 @@ describe('writePackage', () => {
   test('writes the wrapper and links the sources', () => {
     const directory = scratch();
 
-    writePackage(directory, spec, values, source);
+    writePackage(directory, spec, values);
 
     expect(readlinkSync(join(directory, 'Sources', 'Sample'))).toBe(source);
     expect(readFileSync(join(directory, 'xtool.yml'), 'utf8')).toContain('skipLSP: true');
@@ -56,13 +56,13 @@ describe('writePackage', () => {
   test('leaves the files alone when nothing changed, so xtool keeps its build', async () => {
     const directory = scratch();
 
-    writePackage(directory, spec, values, source);
+    writePackage(directory, spec, values);
     const manifest = statSync(join(directory, 'Package.swift')).mtimeMs;
     const config = statSync(join(directory, 'xtool.yml')).mtimeMs;
     const link = lstatSync(join(directory, 'Sources', 'Sample')).mtimeMs;
 
     await Bun.sleep(20);
-    writePackage(directory, spec, values, source);
+    writePackage(directory, spec, values);
 
     expect(statSync(join(directory, 'Package.swift')).mtimeMs).toBe(manifest);
     expect(statSync(join(directory, 'xtool.yml')).mtimeMs).toBe(config);
@@ -73,8 +73,8 @@ describe('writePackage', () => {
     const directory = scratch();
     const changed = { ...spec, swiftVersion: '6.0' };
 
-    writePackage(directory, spec, values, source);
-    writePackage(directory, changed, values, source);
+    writePackage(directory, spec, values);
+    writePackage(directory, changed, values);
 
     expect(readFileSync(join(directory, 'Package.swift'), 'utf8')).toContain(
       '.swiftLanguageMode(.v6)',

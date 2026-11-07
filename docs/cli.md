@@ -79,6 +79,8 @@ The list of copied paths mirrors `SDKEntry.wanted` in the `SDKBuilder.swift` of 
 
 The App Store identity lives in `~/.lipa/signing/<team>`, the development one in `~/.lipa/signing/<team>/development`, both mode 600. `lipa doctor` reports both; the development line is skipped when there is no development identity.
 
+An app with extensions needs one profile per bundle id, of the same kind as the app: import each one with the same certificate and key. `build` stops with `signing_invalid` and names the bundle id whose profile is missing.
+
 ## run
 
 | Flag | Default |
@@ -88,11 +90,12 @@ The App Store identity lives in `~/.lipa/signing/<team>`, the development one in
 | `--udid <udid>` | the only device of the development profile |
 | `--ipa <path>` | build a development IPA first |
 | `--logs app\|all\|none` | `app` on a terminal, `none` with `--json` |
+| `--configuration debug\|release` | `debug`, as the run action of Xcode |
 | `--mac`, `--via`, `--update`, `--clean` | as in `build` |
 
 `run` installs the device helper and its Python environment when they are missing, with the same steps as `lipa setup --only device`. `prepare` does not: it compiles the app and leaves the device alone.
 
-`run` builds with `--signing development` unless `--ipa` is given, checks that the IPA carries a development profile that lists the device, then installs it, mounts the personalized developer image when it is missing, launches the bundle id and follows its log entries until Ctrl-C. `all` keeps every process entry, `app` only the entries of the bundle id.
+`run` builds with `--signing development` and `--configuration debug` unless `--ipa` is given, checks that every profile in the IPA, the extensions included, is a development profile that lists the device, then installs it, mounts the personalized developer image when it is missing, launches the bundle id and follows its log entries until Ctrl-C. `all` keeps every process entry, `app` only the entries of the bundle id.
 
 The device is reached through its RemotePairing service, so a network address works: no USB cable, no Mac, no root. The pairing record is made once on a machine with the device attached:
 
@@ -141,6 +144,7 @@ One run at a time per bundle id. A second `prepare` or `build` fails with `build
 | `--out <ipa>` | `build/<app>.ipa` in the project |
 | `--target <name>` | the first iOS application target |
 | `--signing app-store\|development` | `app-store` |
+| `--configuration release\|debug` | `release`; `debug` needs `--signing development` |
 | `--update`, `--clean` | as in `prepare` |
 
 A relative `--out` is resolved against the project root, not the directory lipa runs from. A development build defaults to `build/<app>-development.ipa`, so it never overwrites the App Store one.
@@ -155,7 +159,7 @@ Steps: read the spec, check the signing, take the build lock, run `prepare`, ass
 lipa inspect build/App.ipa
 ```
 
-Checks the mode of the main executable, `PkgInfo`, `Assets.car` and `CFBundleIcons`, the twelve Xcode keys, the version keys, `LC_BUILD_VERSION`, the code signature, and the profile against the bundle id and its expiry.
+Checks the mode of the main executable, `PkgInfo`, `Assets.car` and `CFBundleIcons`, the twelve Xcode keys, the version keys, `LC_BUILD_VERSION`, the code signature, and the profile of the app against its bundle id and its expiry. `string_catalogs` fails when a `.xcstrings` is left in the bundle. Each `.appex` in `PlugIns` gets its own check: executable mode, `LC_BUILD_VERSION`, signature, a profile for its bundle id, and the build number of the app.
 
 ## doctor
 

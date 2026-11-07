@@ -65,7 +65,7 @@ lipa inspect build/App.ipa
 lipa run --device iphone
 ```
 
-`lipa build` reads `project.yml` from an XcodeGen project: target, bundle id, team, deployment target, sources, resources, packages, Info.plist and entitlements. It writes nothing into the project except `build/`.
+`lipa build` reads `project.yml` from an XcodeGen project: target, bundle id, team, deployment target, sources, resources, packages, Info.plist, entitlements and the app extensions the target embeds. It writes nothing into the project except `build/`.
 
 `lipa doctor` says which step is missing and which command to run.
 
@@ -104,9 +104,10 @@ Support/Prebuilt ◄── actool on a Mac             ▼
                           patch LC_BUILD_VERSION, sign with rcodesign, zip
 ```
 
-- The wrapper package lives in `~/.lipa/work/<bundle-id>/package-<hash>` and points at the project sources with a symlink. The project stays an XcodeGen project.
+- The wrapper package lives in `~/.lipa/work/<bundle-id>/package-<hash>` and points at the project sources with a symlink, one link per sources entry. The project stays an XcodeGen project.
+- An app extension is a target of `project.yml` that the app depends on with `target:`. lipa builds it, puts it in `PlugIns/`, signs it with its own profile and compiles its string catalogs.
 - `LC_BUILD_VERSION` carries the deployment target in its SDK field, and App Store Connect rejects that as an old SDK. lipa patches it to the SDK version it linked against, before signing.
-- Signing needs `cert.pem`, `key.pem` and a profile whose `application-identifier` matches the project. `lipa doctor` checks the three against each other.
+- Signing needs `cert.pem`, `key.pem` and a profile whose `application-identifier` matches the project, plus one profile per extension bundle id. `lipa doctor` checks them against each other.
 - `prepare` compiles into that package and does not sign. `build` calls it, then assembles, signs and zips, so a warm build takes seconds.
 - `actool` output is cached per bundle id with a hash of the asset catalog and the SDK version. A stale cache stops the build with `prebuilt_stale`, it does not build something different from what the Mac would.
 
@@ -124,11 +125,11 @@ Everything lipa owns is under `~/.lipa`: `tools/`, `signing/`, `cache/`, `work/`
 | `lipa signing import` | Stores the certificate, the key and the profile for a bundle id |
 | `lipa prepare` | Compiles the app and refreshes the prebuilt cache, without signing |
 | `lipa build` | Prepare, assemble, patch, strip, sign, zip, inspect |
-| `lipa inspect <ipa>` | Executable mode, plist keys, SDK, signature, profile |
+| `lipa inspect <ipa>` | Executable mode, plist keys, SDK, signature, profile, extensions, string catalogs |
 | `lipa doctor` | Tools, SDK, workspace, cache, signing and the Mac in one report |
 | `lipa run` | Build for development, install on a device, launch and follow its logs |
 
-`prepare` and `build` take `--mac <host>`, `--via <command>`, `--update` for the dependencies and `--clean` for a full recompile. `prepare` also takes `--import <dir>` for an `actool` output produced elsewhere.
+`prepare` and `build` take `--mac <host>`, `--via <command>`, `--update` for the dependencies and `--clean` for a full recompile. `prepare` also takes `--import <dir>` for an `actool` output produced elsewhere. `build` takes `--signing app-store|development` and `--configuration release|debug`, and `run` builds `debug` unless `--configuration release` says otherwise.
 
 Every command answers JSON without a terminal or with `--json`, and exit codes are stable: `2` usage, `3` missing tool or Xcode, `4` stale prebuilt cache, `5` SDK mismatch, `6` signing, `7` bad IPA, `8` Mac unreachable, `9` device unreachable.
 
@@ -137,7 +138,8 @@ Every command answers JSON without a terminal or with `--json`, and exit codes a
 - XcodeGen only. Projects without `project.yml` are not read.
 - Flutter is out: `flutter build ios` refuses to run on Linux.
 - No dSYM: the Linux toolchain has no `dsymutil`. lipa keeps the unstripped binary, with the same UUID, in `~/.lipa/symbols`.
-- One sources directory per target, no storyboards, Core Data models or `.xcstrings`.
+- No storyboards and no Core Data models. String catalogs are compiled on Linux: plain strings, plural and device variations, plural substitutions.
+- App extensions build from their own target, but not with an asset catalog of their own.
 - `swift package` dependencies compile on Linux as they are. A package that needs `actool`, `ibtool` or `momc` for its own resources does not build.
 - The Mac is needed for `actool` only. `lipa sdk --xcode` builds the SDK from a local copy of Xcode, `lipa sdk --mac` takes it from the Mac.
 

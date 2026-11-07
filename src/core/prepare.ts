@@ -1,25 +1,21 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { LipaError } from '@/core/errors.ts';
 import { requirePath, run } from '@/core/exec.ts';
 import { acquireBuildLock } from '@/core/lock.ts';
+import { type BuildValues, writePackage } from '@/core/package.ts';
 import { paths } from '@/core/paths.ts';
-import { type PlistValue, readPlist, serializePlist } from '@/core/plist.ts';
 import { checkPrebuilt, importPrebuilt, type PrebuiltStatus, staleError } from '@/core/prebuilt.ts';
 import { fetchPrebuilt, type RemoteSource, remoteSource } from '@/core/remote.ts';
 import { readSdk, type SdkInfo } from '@/core/sdk.ts';
-import {
-  mergedEntitlements,
-  profileInfo,
-  type SigningStatus,
-  signingStatus,
-  writeEntitlements,
-} from '@/core/signing.ts';
-import { type BuildSpec, expandPlist, readSpec } from '@/core/spec.ts';
+import { signingStatus } from '@/core/signing.ts';
+import { type BuildSpec, readSpec } from '@/core/spec.ts';
 import { SWIFT, swiftToolchain, toolEnvironment, XTOOL } from '@/core/tools.ts';
 import { resolveBuildNumber } from '@/core/version.ts';
-import { ensureSymlink, shortHash, writeIfChanged } from '@/core/work.ts';
+import { shortHash } from '@/core/work.ts';
+
+export type { BuildValues } from '@/core/package.ts';
 
 export type MacSource = RemoteSource | { kind: 'import'; directory: string };
 
@@ -43,11 +39,6 @@ export function macSource(values: {
   }
 
   return source;
-}
-
-export interface BuildValues {
-  version: string;
-  build: string;
 }
 
 export type PrepareStep = 'clean' | 'update' | 'prebuilt' | 'compile';
@@ -95,40 +86,13 @@ export function preparePlan(state: PrepareState): PrepareDecision {
   return { steps, prebuilt, cold: !state.workspaceExists || state.clean };
 }
 
-export function sourcesDirectory(spec: BuildSpec): string {
-  const [source] = spec.sources;
-
-  if (source === undefined) {
-    throw new LipaError({
-      code: 'config_invalid',
-      message: `${spec.root}/project.yml lists no sources directory`,
-    });
-  }
-
-  if (spec.sources.length > 1) {
-    throw new LipaError({
-      code: 'config_invalid',
-      message: 'lipa expects one sources directory per target',
-      fix: 'Point the target at a single folder.',
-    });
-  }
-
-  return source;
-}
-
 export function packageDirectory(spec: BuildSpec, sdkVersion: string): string {
   const toolchain = swiftToolchain();
 
   return join(
     paths().work,
     spec.bundleId,
-    `package-${shortHash([
-      sourcesDirectory(spec),
-      sdkVersion,
-      toolchain,
-      SWIFT.version,
-      XTOOL.version,
-    ])}`,
+    `package-${shortHash([...spec.sources, sdkVersion, toolchain, SWIFT.version, XTOOL.version])}`,
   );
 }
 
@@ -138,122 +102,15 @@ export function workspaceWarm(directory: string, target: string): boolean {
   );
 }
 
-function swiftMode(version: string): string {
-  return version.startsWith('6') ? '.v6' : '.v5';
-}
-
-function packageIdentity(spec: BuildSpec, name: string): string {
-  const dependency = spec.packages.find((item) => item.name === name);
-
-  if (dependency?.url !== undefined) {
-    return basename(dependency.url)
-      .replace(/\.git$/, '')
-      .toLowerCase();
-  }
-
-  if (dependency?.path !== undefined) {
-    return basename(dependency.path).toLowerCase();
-  }
-
-  return name.toLowerCase();
-}
-
-export function packageManifest(spec: BuildSpec): string {
-  const lines = [
-    '// swift-tools-version: 6.0',
-    'import PackageDescription',
-    '',
-    'let package = Package(',
-    `    name: "${spec.target}App",`,
-    `    platforms: [.iOS("${spec.minimumIOS}")],`,
-    '    products: [',
-    `        .library(name: "${spec.target}", targets: ["${spec.target}"])`,
-    '    ],',
-    '    dependencies: [',
-  ];
-
-  for (const dependency of spec.packages) {
-    if (dependency.kind === 'path' && dependency.path !== undefined) {
-      lines.push(`        .package(path: "${dependency.path}"),`);
-      continue;
-    }
-
-    const requirement =
-      dependency.kind === 'exact'
-        ? `exact: "${dependency.requirement}"`
-        : dependency.kind === 'branch'
-          ? `branch: "${dependency.requirement}"`
-          : dependency.kind === 'revision'
-            ? `revision: "${dependency.requirement}"`
-            : `from: "${dependency.requirement}"`;
-
-    lines.push(`        .package(url: "${dependency.url}", ${requirement}),`);
-  }
-
-  lines.push(
-    '    ],',
-    '    targets: [',
-    '        .target(',
-    `            name: "${spec.target}",`,
-    '            dependencies: [',
-  );
-
-  for (const dependency of spec.packages) {
-    lines.push(
-      `                .product(name: "${dependency.product}", package: "${packageIdentity(spec, dependency.name)}"),`,
-    );
-  }
-
-  lines.push(
-    '            ],',
-    `            path: "Sources/${spec.target}",`,
-    `            swiftSettings: [.swiftLanguageMode(${swiftMode(spec.swiftVersion)})]`,
-    '        )',
-    '    ]',
-    ')',
-    '',
-  );
-
-  return lines.join('\n');
-}
-
-export function writePackage(
-  directory: string,
-  spec: BuildSpec,
-  values: BuildValues,
-  source: string,
-): void {
-  mkdirSync(join(directory, 'Support'), { recursive: true });
-  mkdirSync(join(directory, 'Sources'), { recursive: true });
-  ensureSymlink(join(directory, 'Sources', spec.target), source);
-
-  writeIfChanged(join(directory, 'Package.swift'), packageManifest(spec));
-  writeIfChanged(
-    join(directory, 'xtool.yml'),
-    [
-      'version: 1',
-      `bundleID: ${spec.bundleId}`,
-      'infoPath: Support/Info.plist',
-      'entitlementsPath: Support/entitlements.plist',
-      'skipLSP: true',
-      '',
-    ].join('\n'),
-  );
-  writeIfChanged(
-    join(directory, 'Support', 'Info.plist'),
-    serializePlist(expandPlist(spec, values)),
-  );
-}
-
 export interface PrepareInput {
   spec: BuildSpec;
   sdk: SdkInfo;
   values: BuildValues;
-  entitlements: { [key: string]: PlistValue };
   mac?: MacSource | undefined;
   clean?: boolean | undefined;
   update?: boolean | undefined;
   stream?: boolean | undefined;
+  configuration?: BuildConfiguration | undefined;
 }
 
 export interface PreparedWorkspace {
@@ -268,15 +125,37 @@ function tail(output: string): string {
   return output.trim().split('\n').slice(-15).join('\n');
 }
 
+export type BuildConfiguration = 'debug' | 'release';
+
+export function buildConfiguration(
+  value: string | undefined,
+  fallback: BuildConfiguration,
+): BuildConfiguration {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (value === 'debug' || value === 'release') {
+    return value;
+  }
+
+  throw new LipaError({
+    code: 'usage',
+    message: `Unknown configuration: ${value}`,
+    fix: 'Use --configuration debug or --configuration release.',
+  });
+}
+
 export async function compileWorkspace(
   directory: string,
   spec: BuildSpec,
   stream: boolean,
+  configuration: BuildConfiguration = 'release',
 ): Promise<void> {
   const xtool = Bun.which('xtool') ?? join(paths().bin, 'xtool');
   requirePath(xtool, 'xtool', 'Run lipa setup.');
 
-  const compiled = await run([xtool, 'dev', 'build', '--configuration', 'release'], {
+  const compiled = await run([xtool, 'dev', 'build', '--configuration', configuration], {
     cwd: directory,
     stdout: stream ? 'inherit' : 'pipe',
     stderr: stream ? 'inherit' : 'pipe',
@@ -300,7 +179,6 @@ export async function compileWorkspace(
 }
 
 export async function prepareWorkspace(input: PrepareInput): Promise<PreparedWorkspace> {
-  const source = sourcesDirectory(input.spec);
   const directory = packageDirectory(input.spec, input.sdk.version);
   let prebuilt = checkPrebuilt(input.spec, input.sdk.version);
   const decision = preparePlan({
@@ -331,9 +209,8 @@ export async function prepareWorkspace(input: PrepareInput): Promise<PreparedWor
     }
   }
 
-  writePackage(directory, input.spec, input.values, source);
-  writeEntitlements(input.entitlements, join(directory, 'Support', 'entitlements.plist'));
-  await compileWorkspace(directory, input.spec, input.stream === true);
+  writePackage(directory, input.spec, input.values);
+  await compileWorkspace(directory, input.spec, input.stream === true, input.configuration);
 
   return {
     steps: decision.steps,
@@ -342,19 +219,6 @@ export async function prepareWorkspace(input: PrepareInput): Promise<PreparedWor
     prebuilt,
     cold: decision.cold,
   };
-}
-
-export function entitlementsFor(
-  spec: BuildSpec,
-  signing: SigningStatus,
-): { [key: string]: PlistValue } {
-  const project = readPlist(spec.entitlements);
-
-  if (!signing.ok || signing.profile === undefined) {
-    return project;
-  }
-
-  return mergedEntitlements(project, profileInfo(readFileSync(signing.profile), signing.profile));
 }
 
 export interface PrepareOptions {
@@ -400,7 +264,6 @@ export async function prepareProject(options: PrepareOptions): Promise<PrepareRe
       spec,
       sdk,
       values,
-      entitlements: entitlementsFor(spec, signing),
       mac: options.mac,
       clean: options.clean,
       update: options.update,

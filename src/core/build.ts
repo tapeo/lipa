@@ -10,6 +10,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import {
+  assembleExtensions,
+  extensionBinaries,
+  extensionSigningArguments,
+  requireSigning,
+  signedExtensions,
+} from '@/core/appex.ts';
 import { LipaError } from '@/core/errors.ts';
 import { requireCommand, requirePath, run } from '@/core/exec.ts';
 import { inspectIpa } from '@/core/inspect.ts';
@@ -19,8 +26,8 @@ import { paths } from '@/core/paths.ts';
 import { type PlistValue, readPlist, serializePlist } from '@/core/plist.ts';
 import { MAC_KEYS, prebuiltFiles, prebuiltInfo, staleError } from '@/core/prebuilt.ts';
 import {
+  type BuildConfiguration,
   type BuildValues,
-  entitlementsFor,
   type MacSource,
   type PreparedWorkspace,
   prepareWorkspace,
@@ -31,12 +38,11 @@ import {
   type ProfileInfo,
   profileInfo,
   type SigningKind,
-  type SigningStatus,
   signingPaths,
-  signingStatus,
   writeEntitlements,
 } from '@/core/signing.ts';
 import { type BuildSpec, readSpec } from '@/core/spec.ts';
+import { compileCatalogsIn } from '@/core/strings.ts';
 import { swiftToolchain } from '@/core/tools.ts';
 import { resolveBuildNumber } from '@/core/version.ts';
 import { writeIfChanged } from '@/core/work.ts';
@@ -52,6 +58,7 @@ export interface BuildOptions {
   mac?: MacSource | undefined;
   stream?: boolean | undefined;
   signing?: SigningKind | undefined;
+  configuration?: BuildConfiguration | undefined;
 }
 
 export interface BuildResult {
@@ -63,28 +70,11 @@ export interface BuildResult {
   build: string;
   bundleId: string;
   signing: SigningKind;
+  configuration: BuildConfiguration;
+  extensions: string[];
   sdk: string;
   symbols: string;
   checks: Array<{ name: string; ok: boolean; detail: string }>;
-}
-
-interface RequiredSigning extends SigningStatus {
-  cert: string;
-  profile: string;
-}
-
-async function requireSigning(spec: BuildSpec, kind: SigningKind): Promise<RequiredSigning> {
-  const signing = await signingStatus(spec.team, spec.bundleId, kind);
-
-  if (!signing.ok || signing.profile === undefined || signing.cert === undefined) {
-    throw new LipaError({
-      code: 'signing_invalid',
-      message: signing.reason ?? 'Signing is not ready',
-      fix: signing.fix,
-    });
-  }
-
-  return { ...signing, cert: signing.cert, profile: signing.profile };
 }
 
 function copyResourceInto(path: string, destination: string): void {
@@ -145,7 +135,18 @@ export async function buildIos(options: BuildOptions): Promise<BuildResult> {
 async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<BuildResult> {
   const sdk = readSdk();
   const kind: SigningKind = options.signing ?? 'app-store';
-  const signing = await requireSigning(spec, kind);
+  const configuration: BuildConfiguration = options.configuration ?? 'release';
+
+  if (configuration === 'debug' && kind === 'app-store') {
+    throw new LipaError({
+      code: 'usage',
+      message: 'A debug build cannot be signed for the App Store',
+      fix: 'Add --signing development, or build with --configuration release.',
+    });
+  }
+
+  const signing = await requireSigning(spec.team, spec.bundleId, kind);
+  const extensions = await signedExtensions(spec.team, spec.extensions, kind);
   const toolchain = swiftToolchain();
   const objcopy = join(toolchain, 'usr', 'bin', 'llvm-objcopy');
   const rcodesign = Bun.which('rcodesign') ?? join(paths().bin, 'rcodesign');
@@ -167,11 +168,11 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     spec,
     sdk,
     values,
-    entitlements,
     mac: options.mac,
     clean: options.clean,
     update: options.update,
     stream: options.stream,
+    configuration,
   });
 
   if (!prepared.prebuilt.ok) {
@@ -182,20 +183,15 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
   const app = join(work, `${spec.target}.app`);
 
   assemble(prepared, app, spec, values, signing.profile);
-  patchBinary(app, spec, sdk.version);
+  assembleExtensions(app, extensions, values, prebuiltInfo(spec.bundleId), copyResourceInto);
+  compileCatalogsIn(app);
 
-  const symbols = join(paths().symbols, spec.bundleId, `${values.version}-${values.build}`);
+  const symbols = symbolsDirectory(spec, values, configuration);
   const binary = join(app, spec.target);
-  mkdirSync(symbols, { recursive: true });
-  cpSync(binary, join(symbols, spec.target));
 
-  const stripped = await run([objcopy, '--strip-all', binary]);
-
-  if (stripped.exitCode !== 0) {
-    throw new LipaError({ code: 'generic', message: `llvm-objcopy failed: ${stripped.stderr}` });
+  for (const path of [binary, ...extensionBinaries(app, extensions)]) {
+    await finishBinary(path, symbols, objcopy, { sdk: sdk.version, minimum: spec.minimumIOS });
   }
-
-  chmodSync(binary, 0o755);
 
   const entitlementsFile = join(work, 'entitlements.plist');
   writeEntitlements(entitlements, entitlementsFile);
@@ -209,6 +205,7 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     signingPaths(spec.team, kind).key,
     '--entitlements-xml-file',
     entitlementsFile,
+    ...extensionSigningArguments(work, extensions),
     '--timestamp-url',
     'http://timestamp.apple.com/ts01',
     app,
@@ -245,6 +242,8 @@ async function buildPackage(options: BuildOptions, spec: BuildSpec): Promise<Bui
     build: values.build,
     bundleId: spec.bundleId,
     signing: kind,
+    configuration,
+    extensions: extensions.map((extension) => extension.spec.bundleId),
     sdk: sdk.version,
     symbols: join(symbols, spec.target),
     checks: inspection.checks,
@@ -275,11 +274,40 @@ function assemble(
   mergeInfo(join(app, 'Info.plist'), spec, values);
 }
 
-function patchBinary(app: string, spec: BuildSpec, sdkVersion: string): void {
-  const binary = join(app, spec.target);
+function symbolsDirectory(
+  spec: BuildSpec,
+  values: BuildValues,
+  configuration: BuildConfiguration,
+): string {
+  let name = `${values.version}-${values.build}`;
+
+  if (configuration === 'debug') {
+    name = `${name}-debug`;
+  }
+
+  return join(paths().symbols, spec.bundleId, name);
+}
+
+async function finishBinary(
+  binary: string,
+  symbols: string,
+  objcopy: string,
+  version: { sdk: string; minimum: string },
+): Promise<void> {
   const buffer = readFileSync(binary);
-  patchBuildVersion(buffer, { sdk: sdkVersion, minimum: spec.minimumIOS }, binary);
+  patchBuildVersion(buffer, version, binary);
   writeFileSync(binary, buffer);
+
+  mkdirSync(symbols, { recursive: true });
+  cpSync(binary, join(symbols, basename(binary)));
+
+  const stripped = await run([objcopy, '--strip-all', binary]);
+
+  if (stripped.exitCode !== 0) {
+    throw new LipaError({ code: 'generic', message: `llvm-objcopy failed: ${stripped.stderr}` });
+  }
+
+  chmodSync(binary, 0o755);
 }
 
 function packageIpa(app: string, ipa: string, work: string): void {

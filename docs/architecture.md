@@ -4,6 +4,10 @@
 src/main.ts          parse, route, envelope
 src/cli/…            commands, help, output
 src/core/spec.ts     project.yml to BuildSpec
+src/core/extensions.ts the app extensions a target embeds
+src/core/package.ts  wrapper package, xtool.yml, source links
+src/core/appex.ts    extension signing, assembly and entitlements
+src/core/strings.ts  string catalogs to .strings and .stringsdict
 src/core/prepare.ts  plan, workspace, compile
 src/core/build.ts    assemble, patch, sign, zip
 src/core/plist.ts    XML plist read and write
@@ -48,12 +52,32 @@ The package workspace is `~/.lipa/work/<bundle-id>/package-<hash>`, the hash cov
 
 1. `readSpec`, `readSdk`, the signing check and the tool checks. Each failure exits with its own code.
 2. `prepareWorkspace` with the entitlements merged from the project and the profile.
-3. Assemble: copy the app, drop `_CodeSignature`, add the cached `Assets.car` and icons, copy the resource folders flat, write `PkgInfo`, embed the profile, merge the Xcode plist keys.
+3. Assemble: copy the app, drop `_CodeSignature`, add the cached `Assets.car` and icons, copy the resource folders flat, write `PkgInfo`, embed the profile, merge the Xcode plist keys. Each extension gets its resources, its own profile and the Xcode keys without the icons, then every `.xcstrings` in the bundle becomes `<language>.lproj` tables.
 4. Patch `LC_BUILD_VERSION` with the SDK version, copy the binary to `~/.lipa/symbols`, strip, `chmod 755`.
 5. Sign with `rcodesign`, entitlements from the project merged with the profile.
 6. Zip `Payload/`, then run `inspectIpa` and fail with `ipa_invalid` if a check fails.
 
 One lock per bundle id covers both `prepare` and `build`, so they never write the same workspace.
+
+## Sources
+
+A target with one sources directory is linked as `Sources/<target>` in the wrapper package, as before. A target with several entries, folders or single files, gets a real `Sources/<target>` folder with one link per entry, named after it. Two entries with the same name stop the build with `config_invalid`.
+
+## Extensions
+
+`readExtensions` follows the `target:` dependencies of the application whose target has `type: app-extension`, skipping `embed: false`. Each extension needs `INFOPLIST_FILE` and a bundle id under the one of the app; `CODE_SIGN_ENTITLEMENTS` is optional. An asset catalog in an extension stops the build: the prebuilt cache covers the app only.
+
+The wrapper package declares one library per target, and `xtool.yml` names the app with `product` and lists each extension with its bundle id and its expanded Info.plist. xtool links the extension with `_NSExtensionMain` as entry point and puts it in `PlugIns/<target>.appex`. `PRODUCT_MODULE_NAME` expands to the target name, the Swift module of the extension.
+
+`build` asks for a profile of the same kind for every extension bundle id, embeds it in the `.appex`, copies the Xcode keys without the icons and the accent color, sets the version of the app, patches and strips the binary like the main one, and keeps its symbols in the same folder. `rcodesign` signs everything in one call, with `--entitlements-xml-file PlugIns/<target>.appex:<file>` for each extension.
+
+## String catalogs
+
+`compileCatalogsIn` walks the assembled app, extensions and package bundles included, and replaces every `.xcstrings` with `<language>.lproj/<table>.strings`, plus `<table>.stringsdict` when there are plural or device variations. Both are XML plists, which iOS reads like the binary ones Xcode writes. A language without a translation for a key takes the value of the source language. A variation nested in another variation stops the build with `config_invalid` instead of shipping the wrong text.
+
+## Debug builds
+
+`--configuration debug` passes `debug` to `xtool dev build`. Debug and release share the package workspace, each with its own objects under `.build`. A debug build is development only, and its symbols go to `<version>-<build>-debug` so they never replace the ones of a release build with the same numbers.
 
 ## Prebuilt cache
 
@@ -95,4 +119,4 @@ A development profile sets `get-task-allow`, which the merged entitlements carry
 
 ## Limits
 
-One sources directory per target. No storyboards, Core Data models or string catalogs: they need `ibtool`, `momc` and `xcstringstool`, which follow `actool` in the prepare step when a project needs them. Flutter is out.
+No storyboards or Core Data models: they need `ibtool` and `momc`, which would follow `actool` in the prepare step when a project needs them. Flutter is out.

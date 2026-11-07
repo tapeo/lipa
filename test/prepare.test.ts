@@ -188,7 +188,6 @@ describe('prepareProject', () => {
       expect(result.prebuilt.ok).toBe(true);
       expect(result.signing.ok).toBe(false);
       expect(existsSync(join(packagePath, 'xtool', 'Sample.app', 'Sample'))).toBe(true);
-      expect(existsSync(join(packagePath, 'Support', 'entitlements.plist'))).toBe(true);
     } finally {
       restoreVariable('LIPA_HOME', restore.home);
       restoreVariable('LIPA_SDK', restore.sdk);

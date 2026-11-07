@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -27,6 +28,14 @@ function isLink(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function ensureDirectory(path: string): void {
+  if (isLink(path)) {
+    rmSync(path, { force: true });
+  }
+
+  mkdirSync(path, { recursive: true });
 }
 
 export function ensureSymlink(link: string, target: string): void {
