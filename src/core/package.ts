@@ -166,12 +166,18 @@ function missingSources(target: string): LipaError {
   });
 }
 
-function isSingleDirectory(sources: string[]): boolean {
+function isSingleSource(sources: string[]): boolean {
   const [only] = sources;
 
-  return (
-    sources.length === 1 && only !== undefined && existsSync(only) && statSync(only).isDirectory()
-  );
+  if (sources.length !== 1 || only === undefined) {
+    return false;
+  }
+
+  if (!existsSync(only)) {
+    return true;
+  }
+
+  return statSync(only).isDirectory();
 }
 
 export function linkSources(directory: string, target: string, sources: string[]): void {
@@ -182,7 +188,7 @@ export function linkSources(directory: string, target: string, sources: string[]
     throw missingSources(target);
   }
 
-  if (isSingleDirectory(sources)) {
+  if (isSingleSource(sources)) {
     ensureSymlink(link, only);
     return;
   }
