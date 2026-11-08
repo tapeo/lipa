@@ -3,7 +3,12 @@ import { basename, join } from 'node:path';
 
 import { LipaError } from '@/core/errors.ts';
 import { serializePlist } from '@/core/plist.ts';
-import { type BuildSpec, expandPlist, type PackageDependency } from '@/core/spec.ts';
+import {
+  type BinaryDependency,
+  type BuildSpec,
+  expandPlist,
+  type PackageDependency,
+} from '@/core/spec.ts';
 import { ensureDirectory, ensureSymlink, writeIfChanged } from '@/core/work.ts';
 
 export interface BuildValues {
@@ -15,6 +20,7 @@ interface PackageTarget {
   target: string;
   sources: string[];
   packages: PackageDependency[];
+  binaries?: BinaryDependency[] | undefined;
   swiftVersion: string;
 }
 
@@ -28,6 +34,20 @@ function swiftMode(version: string): string {
   }
 
   return '.v5';
+}
+
+export function allBinaries(spec: BuildSpec): BinaryDependency[] {
+  const seen = new Map<string, BinaryDependency>();
+
+  for (const target of packageTargets(spec)) {
+    for (const binary of target.binaries ?? []) {
+      if (!seen.has(binary.name)) {
+        seen.set(binary.name, binary);
+      }
+    }
+  }
+
+  return [...seen.values()];
 }
 
 export function allPackages(spec: BuildSpec): PackageDependency[] {
@@ -89,6 +109,10 @@ function targetBlock(target: PackageTarget): string {
     '            dependencies: [',
   ];
 
+  for (const binary of target.binaries ?? []) {
+    lines.push(`                "${binary.name}",`);
+  }
+
   for (const dependency of target.packages) {
     lines.push(
       `                .product(name: "${dependency.product}", package: "${packageIdentity(dependency)}"),`,
@@ -105,11 +129,21 @@ function targetBlock(target: PackageTarget): string {
   return lines.join('\n');
 }
 
+function binaryBlock(binary: BinaryDependency): string {
+  return [
+    '        .binaryTarget(',
+    `            name: "${binary.name}",`,
+    `            path: "Frameworks/${binary.name}.xcframework"`,
+    '        )',
+  ].join('\n');
+}
+
 export function packageManifest(spec: BuildSpec): string {
   const targets = packageTargets(spec);
   const products = targets.map(
     (target) => `        .library(name: "${target.target}", targets: ["${target.target}"])`,
   );
+  const blocks = [...targets.map(targetBlock), ...allBinaries(spec).map(binaryBlock)];
 
   return [
     '// swift-tools-version: 6.0',
@@ -125,7 +159,7 @@ export function packageManifest(spec: BuildSpec): string {
     ...allPackages(spec).map(dependencyLine),
     '    ],',
     '    targets: [',
-    targets.map(targetBlock).join(',\n'),
+    blocks.join(',\n'),
     '    ]',
     ')',
     '',
@@ -218,6 +252,23 @@ export function linkSources(directory: string, target: string, sources: string[]
   }
 }
 
+export function linkBinaries(directory: string, spec: BuildSpec): void {
+  const folder = join(directory, 'Frameworks');
+  const names = new Set(allBinaries(spec).map((binary) => `${binary.name}.xcframework`));
+
+  mkdirSync(folder, { recursive: true });
+
+  for (const binary of allBinaries(spec)) {
+    ensureSymlink(join(folder, `${binary.name}.xcframework`), binary.path);
+  }
+
+  for (const entry of readdirSync(folder)) {
+    if (!names.has(entry)) {
+      rmSync(join(folder, entry), { recursive: true, force: true });
+    }
+  }
+}
+
 export function writePackage(directory: string, spec: BuildSpec, values: BuildValues): void {
   mkdirSync(join(directory, 'Support'), { recursive: true });
   mkdirSync(join(directory, 'Sources'), { recursive: true });
@@ -225,6 +276,8 @@ export function writePackage(directory: string, spec: BuildSpec, values: BuildVa
   for (const target of packageTargets(spec)) {
     linkSources(directory, target.target, target.sources);
   }
+
+  linkBinaries(directory, spec);
 
   writeIfChanged(join(directory, 'Package.swift'), packageManifest(spec));
   writeIfChanged(join(directory, 'xtool.yml'), xtoolConfig(spec));

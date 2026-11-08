@@ -5,9 +5,11 @@ import { LipaError } from '@/core/errors.ts';
 import { type ExtensionSpec, readExtensions } from '@/core/extensions.ts';
 import { type PlistValue, readPlist } from '@/core/plist.ts';
 import {
+  type BinaryDependency,
   bundleIdOf,
   invalid,
   type PackageDependency,
+  parseBinaries,
   parsePackages,
   parseSources,
   readConfigValue,
@@ -17,7 +19,7 @@ import {
   type Yaml,
 } from '@/core/project-yml.ts';
 
-export type { PackageDependency } from '@/core/project-yml.ts';
+export type { BinaryDependency, PackageDependency } from '@/core/project-yml.ts';
 
 export interface BuildSpec {
   root: string;
@@ -35,6 +37,7 @@ export interface BuildSpec {
   resources: string[];
   sources: string[];
   packages: PackageDependency[];
+  binaries: BinaryDependency[];
   appIcon: string | undefined;
   accentColor: string | undefined;
   deviceFamilies: string[];
@@ -195,6 +198,7 @@ export function readSpec(root: string, options: ReadSpecOptions = {}): BuildSpec
     resources: files.resources,
     sources: files.sources,
     packages: parsePackages(root, project, target),
+    binaries: parseBinaries(root, target),
     appIcon: settings.ASSETCATALOG_COMPILER_APPICON_NAME,
     accentColor: settings.ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME,
     deviceFamilies: (settings.TARGETED_DEVICE_FAMILY ?? '1').split(',').map((item) => item.trim()),

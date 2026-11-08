@@ -1,9 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { LipaError } from '@/core/errors.ts';
 
 export type Yaml = { [key: string]: unknown };
+
+export interface BinaryDependency {
+  name: string;
+  path: string;
+}
 
 export interface PackageDependency {
   name: string;
@@ -181,6 +186,33 @@ export function parsePackages(root: string, project: Yaml, target: Yaml): Packag
   }
 
   return dependencies;
+}
+
+export function parseBinaries(root: string, target: Yaml): BinaryDependency[] {
+  const binaries: BinaryDependency[] = [];
+
+  for (const value of listOf(target.dependencies)) {
+    const dependency = record(value);
+    const framework = text(dependency?.framework);
+
+    if (framework === undefined || !framework.endsWith('.xcframework')) {
+      continue;
+    }
+
+    const path = resolve(root, framework);
+
+    if (!existsSync(path)) {
+      throw invalid(
+        root,
+        `dependency on ${framework}, which is not there`,
+        'Build the framework first, or remove it from the target dependencies.',
+      );
+    }
+
+    binaries.push({ name: basename(path, '.xcframework'), path });
+  }
+
+  return binaries;
 }
 
 interface SourceEntry {
